@@ -140,7 +140,7 @@ class QMModel(object):
         y : array
             Predicted target values
         """
-        x = [self.translate_input(x, **kwargs).ravel()]
+        x = self.translate_input(x, **kwargs).reshape((1,-1))
         if model is None :
             method = method or self.method
             model = self.mmodels[method]
