@@ -1,0 +1,32 @@
+name: Mirror GitHub to GitLab
+
+on:
+  push:
+    branches:
+      - master
+      - main
+      - dev
+    tags:
+      - '*'
+  pull_request:
+      - master
+      - main
+      - dev
+  schedule:
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout GitHub repository
+        uses: actions/checkout@v4
+
+      - name: Mirror to GitLab
+        run: |
+          git clone --mirror https://github.com/${{ github.repository }} repo
+          cd repo
+          git remote set-url --push origin ${{ secrets.GITLAB_REPO_TOKEN }}${{ secrets.GITLAB_URL }}
+          git fetch -p origin
+          git push --mirror
