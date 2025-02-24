@@ -8,11 +8,6 @@ on:
       - dev
     tags:
       - '*'
-  pull_request:
-    branches:
-      - master
-      - main
-      - dev
   schedule:
     - cron: '0 0 * * *'
   workflow_dispatch:
