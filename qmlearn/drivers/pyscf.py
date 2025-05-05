@@ -284,17 +284,18 @@ class EnginePyscf(Engine):
 
                     has_gamma2 = 'gamma2' in properties
                     has_gamma2c = 'gamma2c' in properties
+                    has_gamma2cum = 'gamma2cum' in properties
 
-                    if has_gamma2 and not has_gamma2c:
+                    if has_gamma2 and not (has_gamma2c or has_gamma2cum):
                         self._gamma2 = self.calc_gamma2_cas(properties=properties, ao_repr=ao_repr, ncas=ncas, nelecas=nelecas)
 
-                    elif has_gamma2 and has_gamma2c:
+                    elif has_gamma2 and (has_gamma2c or has_gamma2cum):
                         self._gamma2, self._gamma2c = self.calc_gamma2_cas(properties=properties, ao_repr = ao_repr,
                                                                             ncas=ncas, nelecas=nelecas)
-                    elif has_gamma2c and not has_gamma2:
+                    elif (has_gamma2c or has_gamma2cum) and not has_gamma2:
                         self._gamma2c = self.calc_gamma2_cas(properties=properties, ao_repr = ao_repr,  
                                                              ncas=ncas, nelecas=nelecas)
-                    if has_gamma2c:
+                    if has_gamma2c or has_gamma2cum:
                        self._delta_gamma = self._gamma - self.mf.make_rdm1(ao_repr = ao_repr)
                        self._occ_dg = self.calc_occupations(self._delta_gamma)[0]
 
@@ -468,6 +469,12 @@ class EnginePyscf(Engine):
     def all_gammas(self):
         if self._gamma2 is None:
             self.run(properties = ('energy','gamma2','gamma2c'), eig=False)
+        return self._gamma,self._gamma2,self._gamma2c,self._delta_gamma
+
+    @property
+    def all_gammas_cum(self):
+        if self._gamma2cum is None:
+            self.run(properties = ('energy','gamma2','gamma2cum'), eig=False)
         return self._gamma,self._gamma2,self._gamma2c,self._delta_gamma
 
     @property
