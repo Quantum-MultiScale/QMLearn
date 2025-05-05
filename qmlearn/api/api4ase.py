@@ -119,7 +119,10 @@ class QMLCalculator(Calculator):
         shape = self.qmmodel.refqmmol.vext.shape
         if self.qmmodel.method == 'delta_gamma':
             gamma_d_ = self.qmmodel.predict(qmmol,model=self.qmmodel.mmodels['delta_gamma']).reshape(shape)
-            gamma, gamma_d = qmmol.engine.purify_d_gamma(gamma_d=gamma_d_)
+            if self.qmmodel.purify_gamma :
+              gamma, gamma_d = qmmol.engine.purify_d_gamma(gamma_d=gamma_d_)
+            else:
+              gamma, gamma_d = qmmol.engine.purify_d_gamma(gamma_d=gamma_d_,pure=False)
         else:
             gamma = self.qmmodel.predict(qmmol).reshape(shape)
 
@@ -194,13 +197,19 @@ class QMLCalculator(Calculator):
         shape2 = (shape[0],) * 4
         gamma_d_ = self.qmmodel.predict(qmmol,               
                        model=self.qmmodel.mmodels['delta_gamma']).reshape(shape) 
-        gamma_fp, gamma_d = qmmol.engine.purify_d_gamma(gamma_d=gamma_d_)
+        if self.qmmodel.purify_gamma :
+             gamma_fp, gamma_d = qmmol.engine.purify_d_gamma(gamma_d=gamma_d_)
+        else:
+             gamma_fp, gamma_d = qmmol.engine.purify_d_gamma(gamma_d=gamma_d_,pure=False)
 #        gamma_fp = self.qmmodel.convert_back(gamma_fp_, prop='gamma')
 #        gamma_d = self.qmmodel.convert_back(gamma_d__, prop='gamma')
                                                                                          
         gamma2c_ = self.qmmodel2.predict(qmmol,
                                  model=self.qmmodel2.mmodels['gamma2c']).reshape(shape2)
-        gamma2 , gamma2c = qmmol.engine.purify_gamma2c(gamma=gamma_fp,gamma2c=gamma2c_) 
+        if self.qmmodel.purify_gamma :
+            gamma2 , gamma2c = qmmol.engine.purify_gamma2c(gamma=gamma_fp,gamma2c=gamma2c_) 
+        else:
+            gamma2 , gamma2c = qmmol.engine.purify_gamma2c(gamma=gamma_fp,gamma2c=gamma2c_,pure=False)
 
         if 'gamma' in properties:
             self.results['gamma'] = gamma_fp
@@ -220,6 +229,8 @@ class QMLCalculator(Calculator):
                 forces = self.qmmodel.convert_back(forces, prop='forces')
             else:
                 if qmmol.method == 'fci':
+                    forces = qmmol.engine.get_forces_fci(gamma=gamma_fp,gamma2=gamma2)
+                elif qmmol.method == 'ccsd':
                     forces = qmmol.engine.get_forces_fci(gamma=gamma_fp,gamma2=gamma2)
                 elif qmmol.method == 'casci':
                     ncas = self.qmmodel.refqmmol.engine_options['ncas']
@@ -279,6 +290,7 @@ class QMLCalculator(Calculator):
             | \delta_1RDM : 'delta_gamma'                                                 
             | Correlated 2-RDM: 'gamma2c'                                                 
         """                                     
+        print('RUNNING ENGINE', properties)
         qmmol.engine.run(properties = properties)
 
         if 'delta_gamma' in properties or 'gamma2' in properties or 'gamma2c' in properties or 'gamma' in properties: 

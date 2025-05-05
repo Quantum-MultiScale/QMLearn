@@ -305,10 +305,15 @@ class Engine(object):
         elif method == 'smearing':
             mo_energy = self.calc_delta_mo_energy(occs_g, sigma=sigma)
             fermi, occs_i = self.get_occupations(mo_energy, smearing=smearing, nelectron=nelectron, sigma=sigma, **kwargs)
+        elif method == 'delta':
+            occs_i = occs_g
+            occs_i[occs_i<0.0] = 0.0
         else:
             raise AttributeError("Please give occupations or a supported method.")
-        if abs(occs_i.sum() - nelectron) > 1E-6:
-            raise ValueError('The occupations does not match the number of electrons')
+        if method != 'delta':
+          if abs(occs_i.sum() - nelectron) > 1E-6:
+              raise ValueError('The occupations does not match the number of electrons')
+
         if type == 1:
             gamma = ovlp_x_inv@np.einsum('ik,jk->ij', orbs, orbs*occs_i)@ovlp_x_inv
         else:
@@ -423,7 +428,7 @@ class Engine(object):
            print('1RDM trace is ZERO')
         return eigv[::-1], coeff[:,::-1]
         
-    def purify_d_gamma(self, gamma_d=None, gamma_hf=None):
+    def purify_d_gamma(self, gamma_d=None, gamma_hf=None,pure=True):
 
         r""" Function to Purify \delta gamma1 = gamma^1_{FCI} - gamma^1_{HF}
 
@@ -434,15 +439,18 @@ class Engine(object):
         if gamma_hf is None:
            self.mf.run()
            gamma_hf = self.mf.make_rdm1()
-        ove = self.ovlp
+        #ove = self.ovlp
         
         gamma_full = gamma_hf + gamma_d
-        gamma_f_p = self.purify_gamma(gamma_full,method='smearing')
+        if pure:
+          gamma_f_p = self.purify_gamma(gamma_full,method='smearing')
+        else:
+          gamma_f_p = gamma_full
         gamma_d = gamma_f_p - gamma_hf
 
         return gamma_f_p, gamma_d
 
-    def purify_gamma2c(self,gamma=None,gamma2c=None,gamma_hf=None):
+    def purify_gamma2c(self,gamma=None,gamma2c=None,gamma_hf=None,pure=True):
         if gamma_hf is None:
            self.mf.run()
            gamma_hf = self.mf.make_rdm1()
@@ -450,13 +458,27 @@ class Engine(object):
         a = np.einsum('pq,rs->pqrs',gamma_hf,gamma_hf,optimize=True)
         b = np.einsum('pq,rs->psrq',gamma_hf,gamma_hf,optimize=True)
         gamma2_r = gamma2c + .5*(2*a-b)
-        
-        trace = self.nelectron * (self.nelectron-1)
-        gamma2_f_p = self.update_gamma2(gamma2_r, gamma=gamma, trace = trace)
-        
+
+        if pure:
+          trace = self.nelectron * (self.nelectron-1)
+          gamma2_f_p = self.update_gamma2(gamma2_r, gamma=gamma, trace = trace)
+        else:
+          gamma2_f_p = gamma2_r
+
         gamma2c_p = gamma2_f_p - .5*(2*a-b)
 
         return gamma2_f_p, gamma2c_p
+
+    def purify_gamma2p(self,gamma=None,gamma2c=None,pure=True):
+
+        if pure:
+          trace = 0
+          gamma2_f_p = self.update_gamma2(gamma2c, gamma=gamma, trace = trace)
+        else:
+          gamma2_f_p = gamma2_r
+
+        return gamma2_f_p
+
 
     def gamma1_f_gamma2(self,gamma2, gamma1=None):
         gamma_f = np.einsum('mnst,st->mn',gamma2,self.ovlp,optimize=True)/(self.nelectron-1)

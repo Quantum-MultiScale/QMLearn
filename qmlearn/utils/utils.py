@@ -95,8 +95,8 @@ def blocks2array_g2(blocks, indices):
 
 def wedge(a, b=None):
     if b is None: b = a
-    ab1 = np.einsum('pq,rs->pqrs',a,b) + np.einsum('pq,rs->rspq',a,b)
-    ab2 = np.einsum('pq,rs->prsq',a,b) + np.einsum('pq,rs->sqpr',a,b)
+    ab1 = np.einsum('pq,rs->pqrs',a,b,optimize=True) + np.einsum('pq,rs->rspq',a,b,optimize=True)
+    ab2 = np.einsum('pq,rs->prsq',a,b,optimize=True) + np.einsum('pq,rs->sqpr',a,b,optimize=True)
     return (ab1-ab2)*0.25
 
 def unitary_decompose(amat, a=None, trace=None, r=None, identity=None):
