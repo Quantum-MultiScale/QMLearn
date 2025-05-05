@@ -357,7 +357,12 @@ class EnginePyscf(Engine):
         casdm2 = self.mf2.fcisolver.make_rdm2(ci, ncas, nelecas, reorder=reorder) # MO basis
         casdm1 = self.mf2.fcisolver.make_rdm1(ci, ncas, nelecas) # MO basis
 
-        if 'gamma2' in properties:
+        has_gamma2 = 'gamma2' in properties
+        has_gamma2c = 'gamma2c' in properties
+        has_gamma2cum = 'gamma2cum' in properties
+
+
+        if has_gamma2:
             rdm2_hfc = np.zeros_like(mo_coeff)
             for i in range(ncore):
                 rdm2_hfc[i,i] = 2
@@ -377,7 +382,7 @@ class EnginePyscf(Engine):
                                mo_, mo_,optimize=True) # AO basis
 
 
-        if 'gamma2c' in properties or 'gamma2cum' in properties:
+        if (has_gamma2c or has_gamma2cum):
             use_cumulant = 'gamma2cum' in properties
             print('Cumulant Gamma2' if use_cumulant else 'Correlated Gamma2')
 
@@ -408,11 +413,11 @@ class EnginePyscf(Engine):
                 dm2c = np.einsum('ijkl,pi,qj,rk,sl->pqrs', dm2_cas,
                                     mo_, mo_,
                                     mo_, mo_,optimize=True) # AO basis
-        if 'gamma2c' in properties and 'gamma2' in properties:
+        if (has_gamma2c or has_gamma2cum) and has_gamma2:
             results = dm2,dm2c
-        elif 'gamma2c' in properties and 'gamma2' not in properties:
+        elif (has_gamma2c or has_gamma2cum) and not has_gamma2:
             results = dm2c
-        elif 'gamma2' in properties and 'gamma2c' not in properties:
+        elif has_gamma2 and not (has_gamma2c or has_gamma2cum):
             results = dm2
 
         return results
