@@ -230,6 +230,7 @@ class EnginePyscf(Engine):
                             self._eig_gamma2c = self.eigs_gamma2(self._gamma2c)[0]
 
                     print('FCI energy: ', self._etotal)
+                    self.mf2 = mf2
 
                 elif method2 == 'cisd':
                     mf2 = ci.CISD(self.mf)
@@ -266,19 +267,28 @@ class EnginePyscf(Engine):
                     self._occ = self.calc_occupations(self._gamma)[0]
                     self._etotal = mf2.e_tot
                     print('CISD energy: ', self._etotal)
+                    self.mf2 = mf2
 
                 elif method2 in ['casci', 'casscf']:
                     ncas = self.options.get('ncas', None)
                     nelecas = self.options.get('nelecas', None)
+                    nroots = self.options.get('nroots', None)
                     if ncas is None : ncas = norb
                     if nelecas is None : nelecas = self.mol.nelectron
+                    if nroots is None : nroots = 1
                     mf2 = methods_pyscf[method2](self.mf, ncas, nelecas)
                     #mf2.verbose = self.mf.verbose
                     mf2.verbose = 3
+                    mf2.fcisolver.nroots = nroots
                     mf2.sorting_mo_energy = True
                     mf2.kernel()
 
-                    self._gamma = mf2.make_rdm1() # AO basis
+                    if nroots == 1:
+                        self._gamma = mf2.make_rdm1() # AO basis
+                    else:
+                        mf2.fcisolver.nroots = 1
+                        mf2.kernel()
+                        self._gamma = mf2.make_rdm1()
                     self._occ = self.calc_occupations(self._gamma)[0]
                     self.mf2 = mf2
 

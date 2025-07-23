@@ -117,6 +117,7 @@ class QMMol(object):
         symmetry=self.init_kwargs.get('symmetry', False)
         ncas=self.init_kwargs.get('ncas', None)
         nelecas=self.init_kwargs.get('nelecas', None)
+        nroots=self.init_kwargs.get('nroots', None)
         #
         stereo=self.init_kwargs.get('stereo', True)
         rotate_method=self.init_kwargs.get('rotate_method', None)
@@ -173,6 +174,7 @@ class QMMol(object):
                 engine_options['symmetry'] = symmetry
                 engine_options['ncas'] = ncas
                 engine_options['nelecas'] = nelecas
+                engine_options['nroots'] = nroots
                 if isinstance(xc, (str, type(None))) :
                     engine_options['xc'] = xc
                 elif isinstance(xc, (list, tuple, set)):
