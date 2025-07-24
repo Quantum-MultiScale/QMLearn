@@ -572,7 +572,8 @@ class EnginePyscf(Engine):
         etotal = self.mf.energy_tot(gamma, **kwargs)  # nuc + energy_elec(e1+coul)
         return etotal
 
-    def calc_etotal2(self,gamma2=None,gamma=None,ao_repr=None,hf_core=False,g_c=False, delta_g=None , **kwargs):
+    def calc_etotal2(self,gamma2=None,gamma=None,ao_repr=None,hf_core=False,
+                     g_c=False, delta_g=None,cum=False,gamma2cum=None, **kwargs):
         r""" Get the total electronic energy based on 2-RDM.
 
         Parameters
@@ -590,19 +591,6 @@ class EnginePyscf(Engine):
         -------
         etotal : float
             Total electronic energy. """
-
-        #if gamma2 is None and gamma is None:
-        #    self.run(properties = ('energy','gamma2'),ao_repr=ao_repr,eig=False)
-        #    gamma2=self._gamma2
-        #    gamma=self._gamma
-        #elif gamma2 is None:
-        #    self.run(properties = ('energy','gamma2'),ao_repr=ao_repr,eig=False)
-        #    gamma2=self._gamma2
-        #elif gamma is None and delta_g is None:
-        #    self.run(properties = ('energy'),ao_repr=ao_repr,eig=False)
-        #    gamma=self._gamma
-        #else:
-        #    None
 
         if not ao_repr: # MO representation
             self.mf.run() # HF to get orb and occ
