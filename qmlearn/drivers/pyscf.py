@@ -634,6 +634,17 @@ class EnginePyscf(Engine):
             etotal = self.mf.e_tot + h1_c + h2_c
             print('HF:', self.mf.e_tot,' ','Con_H1: ', h1_c, 'Con_H2: ', h2_c)
 
+        if cum:
+            gamma_a = np.einsum('pq,rs->pqrs',gamma,gamma,optimize=True)
+            gamma_b = np.einsum('pq,rs->psrq',gamma,gamma,optimize=True)
+            gammac = 0.5*(2*gamma_a-gamma_b)
+
+            h1_c = np.einsum('ij,ji', h1e, gamma)
+            h2_g1 = np.einsum('ijkl,ijkl', h2e, gammac,optimize=True) * .5
+            h2_cum = np.einsum('ijkl,ijkl', h2e, gamma2cum,optimize=True) * .5
+            etotal = h1_c + h2_g1 + h2_cum
+            etotal += self.mol.energy_nuc()
+            print('Con_H1: ', h1_c, 'Con_H2_g1: ', h2_g1, 'Con_H2_Cum: ', h2_cum)
         else:
             h1_c=np.einsum('ij,ji', h1e, gamma,optimize=True)
             h2_c=np.einsum('ijkl,ijkl', h2e, gamma2,optimize=True) * .5
