@@ -83,7 +83,7 @@ def run(args):
 
     format = os.path.splitext(trajs[0])[-1][1:]
     if format == 'traj' :
-       train_atoms=read_mages(trajs[0], index=index)
+       train_atoms=read_images(trajs[0], index=index)
     elif format == 'hdf5' :
        db = DBHDF5(trajs[0])
        refqmmol_ao = db.read_qmmol(name=db.get_names('*/qmmol')[0])
