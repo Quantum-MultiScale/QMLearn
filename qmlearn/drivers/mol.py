@@ -87,7 +87,7 @@ class QMMol(object):
     def __init__(self, atoms = None, engine_name = 'pyscf', method = 'rks', basis = '6-31g',
             xc = None, occs=None, refatoms = None, engine_options = {}, charge = None, engine = None,
             stereo = True, rotate_method = 'kabsch', reorder_method = 'none', use_reflection = True,
-            ignore_hydrogen = False, **kwargs):
+            ignore_hydrogen = False, ci_ref=None, **kwargs):
         # Save all the kwargs for duplicate
         self.init_kwargs = locals()
         self.init_kwargs.pop('self', None)
@@ -124,6 +124,7 @@ class QMMol(object):
         reorder_method=self.init_kwargs.get('reorder_method', None)
         use_reflection=self.init_kwargs.get('use_reflection', True)
         ignore_hydrogen=self.init_kwargs.get('ignore_hydrogen', False)
+        ci_ref=self.init_kwargs.get('ci_ref',None)
         #-----------------------------------------------------------------------
         self.op_rotate = np.eye(3)
         self.op_translate = np.zeros(3)
@@ -175,6 +176,7 @@ class QMMol(object):
                 engine_options['ncas'] = ncas
                 engine_options['nelecas'] = nelecas
                 engine_options['nroots'] = nroots
+                engine_options['ci_ref'] = ci_ref
                 if isinstance(xc, (str, type(None))) :
                     engine_options['xc'] = xc
                 elif isinstance(xc, (list, tuple, set)):

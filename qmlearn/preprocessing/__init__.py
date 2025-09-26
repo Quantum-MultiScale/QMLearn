@@ -70,6 +70,7 @@ class AtomsCreater(object):
         atoms = self.atoms
         #
         pos = PCA().fit_transform(atoms.positions)
+        #print('POS: ',pos)
         if np.all(pos[:, 1] < 1E-8): # linear molecule
             nstart = 5
         else : # nonlinear molecule
@@ -212,6 +213,8 @@ def append_properties(atoms, data = None, properties = None, refqmmol = None, qm
             data[key].append(qmmol.engine.occ_dg)
         elif key == 'occ':
             data[key].append(qmmol.engine.occ)
+        elif key == 'energy_c':
+            data[key].append(qmmol.engine.etotal_c)
         else :
             raise ValueError(f'Sorry, not support the property {key} now')
     return data

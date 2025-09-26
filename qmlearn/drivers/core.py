@@ -53,6 +53,7 @@ class Engine(object):
         self._gamma2 = None
         self._gamma2c = None
         self._etotal = None
+        self._etotal_c = None
         self._forces = None
         self._occ = None
         self._mo_energy = None
@@ -60,6 +61,10 @@ class Engine(object):
         self._eig_gamma2c = None
         self._delta_gamma = None
         self._gamma2cum = None
+        self._gamma_00 = None
+        self._gamma_01 = None
+        self._gamma_10 = None
+        self._gamma_11 = None
         self._occ_dg = None
         #
         self._kop = None
@@ -95,6 +100,10 @@ class Engine(object):
     @property
     def etotal(self):
         r""" Total Energy. """
+        pass
+    @property
+    def etotal_c(self):
+        r"""Correlated Energy. """
         pass
 
     @property
@@ -296,6 +305,7 @@ class Engine(object):
         nelectron = nelectron or self.nelectron
         ovlp_x_inv = self.ovlp_x_inv
         occs_g, orbs = self.calc_occupations(gamma, type=type)
+        #print(occs_g)
         if occs is not None:
             occs_i = occs
         elif method == 'aufbau':
@@ -313,8 +323,9 @@ class Engine(object):
             raise AttributeError("Please give occupations or a supported method.")
         if method != 'delta':
           if abs(occs_i.sum() - nelectron) > 1E-6:
+              print('Number of e: ', occs_i.sum(),nelectron)
               raise ValueError('The occupations does not match the number of electrons')
-
+        #print(occs_i)
         if type == 1:
             gamma = ovlp_x_inv@np.einsum('ik,jk->ij', orbs, orbs*occs_i)@ovlp_x_inv
         else:
@@ -405,7 +416,6 @@ class Engine(object):
             print('2RDM is NOT positive semidefinite')
         else:
             print('2RDM is positive semidefinite')
-         
         if not np.allclose(trace_gamma2, 0, atol=1e-3):
             print('2RDM trace is not ZERO -> N', trace_gamma2,'!=', 0)
         else:
@@ -429,7 +439,7 @@ class Engine(object):
            print('1RDM trace is ZERO')
         return eigv[::-1], coeff[:,::-1]
         
-    def purify_d_gamma(self, gamma_d=None, gamma_hf=None,pure=True):
+    def purify_d_gamma(self, gamma_d=None, gamma_hf=None,pure=True,method='smearing'):
 
         r""" Function to Purify \delta gamma1 = gamma^1_{FCI} - gamma^1_{HF}
 
@@ -444,9 +454,10 @@ class Engine(object):
         
         gamma_full = gamma_hf + gamma_d
         if pure:
-          gamma_f_p = self.purify_gamma(gamma_full,method='smearing')
+          gamma_f_p = self.purify_gamma(gamma_full,method=method)
         else:
           gamma_f_p = gamma_full
+
         gamma_d = gamma_f_p - gamma_hf
 
         return gamma_f_p, gamma_d

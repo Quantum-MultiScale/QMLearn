@@ -143,7 +143,7 @@ class EnginePyscf(Engine):
             mol = gto.M(atom = atom, basis=basis, charge = charge,symmetry=symmetry, parse_arg = False)
         return mol
 
-    def run(self, properties = ('energy', 'forces'), ao_repr=True, eig=True, **kwargs):
+    def run(self, properties = ('energy', 'forces'), ao_repr=True, eig=True, singlet=True, **kwargs):
         r""" Caculate electronic properties using PySCF.
 
         Parameters
@@ -166,7 +166,11 @@ class EnginePyscf(Engine):
         """
         if 'energy' in properties or self._gamma is None :
             # (dft.uks.UKS, dft.rks.RKS, scf.uhf.UHF, scf.hf.RHF))
-            self.mf.run()
+            dm0_ref = self.options.get('dm0',None)
+            if dm0_ref is not None:
+                self.mf.run(dm0=dm0_ref)
+            else:
+                self.mf.run()
             self.occs = self.mf.get_occ()
             norb = self.occs.shape[0]
             self._mo_energy = self.mf.mo_energy
@@ -273,16 +277,31 @@ class EnginePyscf(Engine):
                     ncas = self.options.get('ncas', None)
                     nelecas = self.options.get('nelecas', None)
                     nroots = self.options.get('nroots', None)
+                    ci_ref = self.options.get('ci_ref',None)
                     if ncas is None : ncas = norb
                     if nelecas is None : nelecas = self.mol.nelectron
                     if nroots is None : nroots = 1
                     mf2 = methods_pyscf[method2](self.mf, ncas, nelecas)
-                    #mf2.verbose = self.mf.verbose
+                    mf2.verbose = self.mf.verbose
                     mf2.verbose = 3
+                    mf2.fcisolver = fci.solver(self.mol,singlet=singlet)
                     mf2.fcisolver.nroots = nroots
-                    mf2.sorting_mo_energy = True
-                    mf2.kernel()
+                    #mf2.natorb = True
+                    #mf2.sorting_mo_energy = True
 
+                    if ci_ref is not None:
+                        print('Using CI REF! ')
+                        mf2.kernel(ci0=ci_ref)
+                    else:
+                        mf2.kernel()
+
+                    if 'gamma_trans' in properties:
+                        self.mf2 = mf2
+                        self._gamma_00, self._gamma_01, self._gamma_10, self._gamma_11 = self.calc_gamma_trans(
+                                                                                         properties=properties,
+                                                                                         ao_repr = ao_repr, 
+                                                                                         ncas=ncas,
+                                                                                         nelecas=nelecas)
                     if nroots == 1:
                         self._gamma = mf2.make_rdm1() # AO basis
                     else:
@@ -297,11 +316,13 @@ class EnginePyscf(Engine):
                     has_gamma2cum = 'gamma2cum' in properties
 
                     if has_gamma2 and not (has_gamma2c or has_gamma2cum):
-                        self._gamma2 = self.calc_gamma2_cas(properties=properties, ao_repr=ao_repr, ncas=ncas, nelecas=nelecas)
+                        self._gamma2 = self.calc_gamma2_cas(properties=properties,
+                                                            ao_repr=ao_repr, ncas=ncas, nelecas=nelecas)
 
                     elif has_gamma2 and (has_gamma2c or has_gamma2cum):
-                        self._gamma2, self._gamma2c = self.calc_gamma2_cas(properties=properties, ao_repr = ao_repr,
-                                                                            ncas=ncas, nelecas=nelecas)
+                        self._gamma2, self._gamma2c = self.calc_gamma2_cas(properties=properties,
+                                                                           ao_repr = ao_repr,
+                                                                           ncas=ncas, nelecas=nelecas)
                     elif (has_gamma2c or has_gamma2cum) and not has_gamma2:
                         self._gamma2c = self.calc_gamma2_cas(properties=properties, ao_repr = ao_repr,  
                                                              ncas=ncas, nelecas=nelecas)
@@ -317,6 +338,7 @@ class EnginePyscf(Engine):
 
                     self._orb = self.mf.mo_coeff
                     self._etotal = mf2.e_tot
+                    
                     print('CASCI E: ', self._etotal)
                 else :
                     mf2 = methods_pyscf[method2](self.mf)
@@ -348,6 +370,7 @@ class EnginePyscf(Engine):
                         # print('ccst(t)', self._etotal, ccsd_t)
                         self._etotal = self._etotal + ccsd_t
                 self.mf2 = mf2
+                self._etotal_c = self._etotal - self.mf.e_tot
             else :
                 mf = self.mf
                 self._orb = mf.mo_coeff
@@ -356,6 +379,40 @@ class EnginePyscf(Engine):
 
         if 'forces' in properties :
             self._forces = self.run_forces()
+
+    def calc_gamma_trans(self, properties, ao_repr=True, ncas=None,nelecas=None,*kwargs):
+
+        """ Built Diabatic states \gamma_00, \gamma_01, \gamma_10, \gamma_00 """
+
+        if ncas is None:
+           ncas = self.mf2.ncas
+        if nelecas is None:
+           nelecas = self.mf2.nelecas
+
+        ci = self.mf2.ci
+        ncore = self.mf2.ncore
+        norb=ncas
+        nelec=np.sum(nelecas)
+
+        psi_0 = (np.array(ci[0]) + np.array(ci[1])) / np.sqrt(2)
+        psi_1 = (np.array(ci[0]) - np.array(ci[1])) / np.sqrt(2)
+        
+        gamma_00 = self.mf2.make_rdm1(ci=psi_0,ncas=ncas,nelecas=nelecas)
+        gamma_11 = self.mf2.make_rdm1(ci=psi_1,ncas=ncas,nelecas=nelecas)
+        rdm1_s0_s1 = self.mf2.fcisolver.trans_rdm1(psi_0,psi_1,norb,nelec)
+        rdm1_s1_s0 = self.mf2.fcisolver.trans_rdm1(psi_1,psi_0,norb,nelec)
+
+        mo_coeff = self.mf2.mo_coeff
+         
+        mocore = mo_coeff[:,:ncore]
+        mocas = mo_coeff[:,ncore:ncore+ncas]
+        dm1_hf = np.dot(mocore, mocore.conj().T) * 2
+        dm1_hf = np.zeros_like(dm1_hf)
+
+        gamma_01 = dm1_hf + reduce(np.dot, (mocas, rdm1_s0_s1, mocas.conj().T))
+        gamma_10 = dm1_hf + reduce(np.dot, (mocas, rdm1_s1_s0, mocas.conj().T))
+        
+        return gamma_00, gamma_01, gamma_10, gamma_11
 
     def calc_gamma2_cas(self, properties, ao_repr=True,ncas=None,nelecas=None,reorder=True,*kwargs):
         ncore = self.mf2.ncore
@@ -493,6 +550,12 @@ class EnginePyscf(Engine):
         return self._gamma,self._gamma2,self._gamma2c,self._delta_gamma
 
     @property
+    def gamma_trans(self):
+        if self._gamma_00 is None:
+            self.run(properties = ('energy','gamma_trans'))
+        return self._gamma_00, self._gamma_01, self._gamma_10, self._gamma_11
+
+    @property
     def occ_dg(self):
         if self._occ_dg is None:
             self.run(properties = ('energy','gamma2c'))
@@ -503,6 +566,12 @@ class EnginePyscf(Engine):
         if self._etotal is None:
             self.run(properties = ('energy'))
         return self._etotal
+
+    @property
+    def etotal_c(self):
+        if self._etotal_c is None:
+            self.run(properties = ('energy'))
+        return self._etotal_c
 
     @property
     def forces(self):

@@ -33,7 +33,7 @@ class QMModel(object):
         Reference QMMol object
     """
     def __init__(self, mmodels = None, method='gamma', ncharge=None, nspin = 1, occs = None,
-            refqmmol = None, purify_gamma = True, **kwargs):
+            refqmmol = None, purify_gamma = True, purify_Gamma = True, **kwargs):
         self.init_kwargs = locals()
         self.init_kwargs.pop('self', None)
         self.init_kwargs.pop('kwargs', None)
@@ -42,6 +42,7 @@ class QMModel(object):
         self._method = method
         self.mmodels = mmodels or {}
         self.purify_gamma = purify_gamma
+        self.purify_Gamma = purify_Gamma
         #
         if self.method not in self.mmodels :
             self.mmodels[self.method] = KernelRidge(alpha=0.1,kernel='linear')
@@ -78,8 +79,12 @@ class QMModel(object):
 
     @property
     def method(self):
-        if self._method.lower() not in {'gamma','gamma2c','gamma2','gamma2cum','occ','eigs_gammat','eigs_gammatc','occ_dg','delta_gamma'} :
-            raise AttributeError("Only support 'gamma', 'gamma2c', 'gamma2', 'gamma2cum', 'occ', 'eigs_gammat', 'eigs_gammatc', 'occ_dg' or 'delta_gamma' method now.")
+        if self._method.lower() not in {'gamma','gamma2c','gamma2','gamma2cum',
+                                        'occ','eigs_gammat','eigs_gammatc',
+                                        'occ_dg','delta_gamma','gamma_00','gamma_01','gamma_10','gamma_11'} :
+            raise AttributeError("""Only support 'gamma', 'gamma2c', 'gamma2', 'gamma2cum', 'occ',
+                                  'eigs_gammat', 'eigs_gammatc', 'occ_dg' or 'delta_gamma'
+                                  'gamma_00','gamma_01','gamma_10','gamma_11', method now.""")
         return self._method
 
     def fit(self, X, y, model = None, method = None):
@@ -140,6 +145,7 @@ class QMModel(object):
         y : array
             Predicted target values
         """
+        #x = [self.translate_input(x, **kwargs).ravel()]
         x = self.translate_input(x, **kwargs).reshape((1,-1))
         if model is None :
             method = method or self.method

@@ -42,6 +42,22 @@ def get_args():
                         default=2, help='N Active Space')
     parser.add_argument('--nelecas', dest='nelecas', type=int, action='store',
                         default=2, help='N Electrons')
+    parser.add_argument('--nroots', dest='nroots', type=int, action='store',
+                        default=1, help='Roots to be calculated')
+    parser.add_argument('--rotate_method', dest='rotate_method', type=str, action='store',
+                        default='kabsch', help='Rotate Method')
+    parser.add_argument('--reorder_method', dest='reorder_method', type=str, action='store',
+                        default='inertia-hungarian', help='Reorder Method')
+    parser.add_argument('--ignore_hydrogen', action='store_true',
+                        default=False, help='Ignore hydrogens (reorder) if flag is given')
+    parser.add_argument('--no_reflection', dest='use_reflection',  action='store_false',
+                        default=True, help='Disable reflection (default: enabled)')
+    parser.add_argument('--no_stereo', dest='stereo' , action='store_false',
+                        default=True, help='Disable stereo (default: enabled)')
+    parser.add_argument('--ci_ref', dest='ci_ref', type=str, action='store',
+                        default=None, help='Use a CI vector as Ref')
+    parser.add_argument('--dm0', dest='dm0', type=str, action='store',
+                        default=None, help='Use a initial guess for RDM')
     args = parser.parse_args()
     return args
 
@@ -60,6 +76,14 @@ def run(args):
     merge = args.merge
     ncas = args.ncas
     nelecas = args.nelecas
+    nroots = args.nroots
+    use_reflection = args.use_reflection
+    ignore_hydrogen = args.ignore_hydrogen
+    stereo = args.stereo
+    rotate_method = args.rotate_method
+    reorder_method = args.reorder_method
+    ci_ref = args.ci_ref
+    dm0 = args.dm0
     #-----------------------------------------------------------------------
     trajs = list(OrderedDict.fromkeys(trajs))
     print(f'Input files are : {trajs}')
@@ -79,6 +103,14 @@ def run(args):
             'charge' : charge,
             'ncas' : ncas,
             'nelecas' : nelecas,
+            'nroots' : nroots,
+            'use_reflection' : use_reflection,
+            'ignore_hydrogen' : ignore_hydrogen,
+            'stereo' : stereo,
+            'rotate_method' : rotate_method,
+            'reorder_method' : reorder_method,
+            'ci_ref' : ci_ref,
+            'dm0' : dm0,
             }
 
     format = os.path.splitext(trajs[0])[-1][1:]
