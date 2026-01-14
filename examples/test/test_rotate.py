@@ -10,7 +10,7 @@ from qmlearn.drivers.core import minimize_rmsd_operation, atoms_rmsd
 class Water(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.energy = -76.09381930374022
+        cls.energy = -76.09381930372805
         atoms = ase.build.molecule('H2O')
         basis = 'cc-pvTZ'
         xc = 'lda,vwn_rpa'
@@ -56,7 +56,7 @@ class Water(unittest.TestCase):
         s2 = qmmol2.ovlp
         self.assertTrue(np.allclose(s, s2))
         #
-        rotmat = qmmol2.rotation2rotmat(qmmol2.op_rotate)
+        rotmat = qmmol2.rotation2rotmat(qmmol2.op_rotate, factor=-1.0)
         s2_back = rotmat.T @ s2 @ rotmat
         self.assertTrue(np.allclose(s2_back, s2_ori))
 

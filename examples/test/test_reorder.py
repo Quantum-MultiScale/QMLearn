@@ -15,7 +15,7 @@ class Reorder(unittest.TestCase):
         xc = 'lda,vwn_rpa'
         method = 'rks'
         charge = 0
-        qmmol = QMMol(atoms = atoms, method = method, basis=basis, xc = xc, charge=charge)
+        qmmol = QMMol(atoms = atoms, method = method, basis=basis, xc = xc, charge=charge, reorder_method='inertia-hungarian')
         cls.qmmol = qmmol
         cls.qmmol.run()
 
