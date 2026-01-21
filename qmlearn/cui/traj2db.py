@@ -27,6 +27,8 @@ def get_args():
             default='6-31g', help='basis set for engine')
     parser.add_argument('--charge', dest='charge', type=int, action='store',
             default=0, help='Total number of electrons in the system')
+    parser.add_argument('--spin', dest='spin', type=int, action='store',
+            default=0, help='Spin = 2S = Nalpha - Nbeta, not 2S+1')
     parser.add_argument('--method', dest='method', type=str, action='store',
             default='rks', help='The method for the engine')
     parser.add_argument('--istart', dest='istart', type=int, action='store',
@@ -58,6 +60,12 @@ def get_args():
                         default=None, help='Use a CI vector as Ref')
     parser.add_argument('--dm0', dest='dm0', type=str, action='store',
                         default=None, help='Use a initial guess for RDM')
+    parser.add_argument('--masses', dest='masses', type=str, action='store',
+                        default=None, help='List of desired atomic masses')
+    parser.add_argument('--inv', dest='inv', type=bool, action='store',
+                        default=False, help='If "Yes" will multiply gamma and Gamma by np.linalg.inv(vext)')
+    parser.add_argument('--mom', dest='mom', type=bool, action='store',
+                        default=False, help='If "Yes" MOM will be apply taking as Reference: refqmmol') 
     args = parser.parse_args()
     return args
 
@@ -68,6 +76,7 @@ def run(args):
     xc = args.xc
     method = args.method
     charge = args.charge
+    spin = args.spin
     output = args.output
     properties = args.properties
     trajs = args.trajs
@@ -84,6 +93,9 @@ def run(args):
     reorder_method = args.reorder_method
     ci_ref = args.ci_ref
     dm0 = args.dm0
+    masses = args.masses
+    inv = args.inv
+    mom = args.mom
     #-----------------------------------------------------------------------
     trajs = list(OrderedDict.fromkeys(trajs))
     print(f'Input files are : {trajs}')
@@ -101,6 +113,7 @@ def run(args):
             'xc' : xc,
             'method' : method,
             'charge' : charge,
+            'spin' : spin,
             'ncas' : ncas,
             'nelecas' : nelecas,
             'nroots' : nroots,
@@ -111,7 +124,10 @@ def run(args):
             'reorder_method' : reorder_method,
             'ci_ref' : ci_ref,
             'dm0' : dm0,
+            'masses' : masses,
             }
+
+    #print(qmmol_options)
 
     format = os.path.splitext(trajs[0])[-1][1:]
     if format == 'traj' :
@@ -121,12 +137,17 @@ def run(args):
        refqmmol_ao = db.read_qmmol(name=db.get_names('*/qmmol')[0])
        atoms_positions = db.read_images(name=db.get_names('*/train_atoms_*')[0])
        train_atoms=atoms_positions[istart:iend]
-
     data= {k: [] for k in properties}
     for i, atoms in tenumerate(train_atoms):
+        if masses is not None: atoms.masses = masses
         qmmol = QMMol(atoms = atoms, **qmmol_options)
+#        if reorder_method is not None: qmmol = qmmol.duplicate(atoms)
         if i == 0 : refqmmol = qmmol
-        data = append_properties(qmmol, data = data)
+        if mom:
+#          print("Using MOM: ", mom)
+          data = append_properties(qmmol, data = data, inv = inv, refqmmol = refqmmol, mom = mom) 
+        else:
+          data = append_properties(qmmol, data = data, inv = inv)
 
     write_db(output, refqmmol, train_atoms, data)
 

@@ -8,12 +8,13 @@ This test suite:
 4. Tests QMModel creation from database
 5. Tests QMLCalculator usage
 
-Note: The database file is automatically generated during setUpClass and deleted
-after testing in tearDownClass. Using LDA instead of B3LYP for faster execution.
+Note: The database file and 'ir' directory are automatically generated during setUpClass
+and deleted after testing in tearDownClass. Using LDA instead of B3LYP for faster execution.
 """
 import unittest
 import numpy as np
 import os
+import shutil
 import ase.build
 from pathlib import Path
 
@@ -61,13 +62,22 @@ class H2OLDA(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        """Clean up: delete the database file after testing"""
+        """Clean up: delete the database file and ir directory after testing"""
         if cls.dbfile.exists():
             try:
                 cls.dbfile.unlink()
                 print(f"Deleted test database: {cls.dbfile}")
             except Exception as e:
                 print(f"Warning: Could not delete database file {cls.dbfile}: {e}")
+
+        # Clean up the 'ir' directory created by ASE Infrared
+        ir_dir = Path('ir')
+        if ir_dir.exists():
+            try:
+                shutil.rmtree(ir_dir)
+                print(f"Deleted ir directory: {ir_dir}")
+            except Exception as e:
+                print(f"Warning: Could not delete ir directory {ir_dir}: {e}")
 
     @classmethod
     def _generate_database(cls):

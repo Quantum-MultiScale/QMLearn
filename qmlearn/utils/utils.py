@@ -178,7 +178,7 @@ def total_scater_factor(atoms,gamma2,limit=50,level=3,
 
 def fft_gamma(q,gamma,r,w,ao_value):
     b_2_a=0.529177 
-    iqr=np.exp(1j*np.einsum('i,pi->p',q,r*b_2_a))
+    iqr=np.exp(1j*np.einsum('i,pi->p',q,r*b_2_a,optimize=True))
     mat = np.einsum('mn, p, pm, pn->',gamma, iqr*w, ao_value, ao_value, optimize=True)
     return mat
 

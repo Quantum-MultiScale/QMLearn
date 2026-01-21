@@ -12,7 +12,7 @@ from rmsd.calculate_rmsd import (
 
 from qmlearn.utils.utils import matrix_deviation, unitary_decompose, wedge
 from qmlearn.data import REFLECTION
-
+from scipy.optimize import linear_sum_assignment
 
 class Engine(object):
     r"""Abstract Base class for the External calculator.
@@ -494,7 +494,7 @@ class Engine(object):
 
     def gamma1_f_gamma2(self,gamma2, gamma1=None):
         gamma_f = np.einsum('mnst,st->mn',gamma2,self.ovlp,optimize=True)/(self.nelectron-1)
-        if gamma1.any():
+        if gamma1 is not None:
           print('Check gamma1 from gamma2 == given gamma1: ', np.allclose(gamma1,gamma_f))
         return gamma_f
 
@@ -754,6 +754,9 @@ def minimize_rmsd_operation(target, atoms, stereo = True, rotate_method = 'kabsc
     pos = atoms2.get_positions()
     c = np.mean(pos, axis=0)
     pos = pos - c
+
+    #print('Initial positions: (Target) (Atoms) ', pos_t,pos)
+    #print('Initial conditions (Reflection, Rotation): ', use_reflection, rotate_method)
     #-----------------------------------------------------------------------
     atoms1.positions[:] = pos_t
     #-----------------------------------------------------------------------
@@ -775,7 +778,7 @@ def minimize_rmsd_operation(target, atoms, stereo = True, rotate_method = 'kabsc
         rotate = get_match_rotate(atoms1, atoms2, rotate_method = rotate_method)
         atoms2.positions[:] = np.dot(atoms2.positions[:], rotate)
         rmsd = diff_coords(atoms1.positions, atoms2.positions)
-        # print('ia', ia, rmsd, indices)
+        print('indices: ', indices, rmsd, 'rotated_method: ', rotate_method)
         if rmsd < rmsd_final_min :
             rmsd_final_min = rmsd
             rmsd_final_rotate = rotate
@@ -785,7 +788,7 @@ def minimize_rmsd_operation(target, atoms, stereo = True, rotate_method = 'kabsc
             if rmsd < rmsd_cut : break
     rotate = np.dot(rmsd_final_reflection, rmsd_final_rotate)
     translate = c_t - np.dot(c, rotate)
-    # print('rmsd_final_min', rmsd_final_min)
+    print('rmsd_final_min', rmsd_final_min)
     if ignore_hydrogen : rmsd_final_indices = np.arange(len(atoms))
     return rotate, translate, rmsd_final_indices
 
@@ -879,3 +882,29 @@ def reorder_atoms_indices(target, atoms, reorder_method='hungarian'):
         indices = reorder_method(np.asarray(target.get_chemical_symbols()),
                 np.asarray(atoms.get_chemical_symbols()), target.positions, atoms.positions)
     return indices
+
+
+class MOMOrbitalTracker:
+
+    """
+        mol : New mol PySCF object
+        mo_ref: Reference MO
+        """
+    
+    def __init__(self, mol, mo_ref):
+        self.S = mol.intor('int1e_ovlp')
+        self.mo_ref = mo_ref.copy()
+
+    def reorder(self, mo_coeff):
+        # overlap matrix
+        O = np.abs(self.mo_ref.conj().T @ self.S @ mo_coeff)
+
+        # Hungarian algorithm: maximize total overlap
+        row, col = linear_sum_assignment(-O)
+
+        mo_new = mo_coeff[:, col]
+
+        # update reference
+        self.mo_ref = mo_new.copy()
+
+        return mo_new, col

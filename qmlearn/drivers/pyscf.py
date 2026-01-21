@@ -13,7 +13,7 @@ from functools import reduce
 from pyscf.scf import cphf
 from pyscf.grad.mp2 import _shell_prange
 
-from qmlearn.drivers.core import Engine
+from qmlearn.drivers.core import Engine, MOMOrbitalTracker
 
 methods_pyscf = {
         'dft' : dft.RKS,
@@ -88,7 +88,7 @@ class EnginePyscf(Engine):
         self.method = self.options.get('method', 'rks').lower()
         charge = self.options.get('charge', None)
         symmetry = self.options.get('symmetry',False)
-        # ao_repr = self.options.get('ao_repr', True)
+        #ao_repr = self.options.get('ao_repr', True)
         #
         if isinstance(self.method, str):
             if self.method in ['mp2', 'cisd', 'fci', 'ccsd', 'ccsd(t)', 'casci', 'casscf'] :
@@ -105,6 +105,8 @@ class EnginePyscf(Engine):
             mf.verbose = verbose
         self.mf = mf
         self.mol = self.mf.mol
+        self.h1e = self.mf.get_hcore()
+        self.h2e = self.mf.mol.intor('int2e')
 
     def init_mol(self, mol, basis, charge = 0,symmetry=False):
         r""" Function to create PySCF atom object
@@ -143,7 +145,7 @@ class EnginePyscf(Engine):
             mol = gto.M(atom = atom, basis=basis, charge = charge,symmetry=symmetry, parse_arg = False)
         return mol
 
-    def run(self, properties = ('energy', 'forces'), ao_repr=True, eig=True, singlet=True, **kwargs):
+    def run(self, properties = ('energy', 'forces'), ao_repr=True, eig=True, singlet=True, mom=False, refqmmol=None, **kwargs):
         r""" Caculate electronic properties using PySCF.
 
         Parameters
@@ -179,6 +181,7 @@ class EnginePyscf(Engine):
                 method2 = self.method.split('+')[1]
                 if method2 == 'fci':
                     nroots = self.options.get('nroots', 1)
+                    if nroots is None : nroots = 1
                     mf2 = methods_pyscf[method2](self.mf)
                     mf2.verbose = self.mf.verbose
                     #
@@ -286,12 +289,24 @@ class EnginePyscf(Engine):
                     mf2.verbose = 3
                     mf2.fcisolver = fci.solver(self.mol,singlet=singlet)
                     mf2.fcisolver.nroots = nroots
-                    #mf2.natorb = True
+                    
                     #mf2.sorting_mo_energy = True
-
+                    print('Check: ', properties)
                     if ci_ref is not None:
                         print('Using CI REF! ')
                         mf2.kernel(ci0=ci_ref)
+                    elif mom:
+                        print('Using MOM method: ')
+                        mol_ref = refqmmol.engine.mol
+                        mo_ref = refqmmol.engine.mf.mo_coeff
+                        
+                        tracker = MOMOrbitalTracker(mol_ref, mo_ref)
+                        mo_new, perm = tracker.reorder(self.mf.mo_coeff)
+                        self.mf.mo_coeff = mo_new
+                        self.mf.mo_occ = self.mf.mo_occ[perm]
+                        self.mf.mo_energy = self.mf.mo_energy[perm]
+                        mf2 = methods_pyscf[method2](self.mf, ncas, nelecas)
+                        mf2.kernel()
                     else:
                         mf2.kernel()
 
@@ -670,9 +685,11 @@ class EnginePyscf(Engine):
             h2e = ao2mo.kernel(self.mol.intor('int2e'),orb)
             h2e = ao2mo.restore(1, h2e, nmo)
         else:
-            h_core=self.mf.get_hcore()
-            h1e = h_core
-            h2e = self.mol.intor('int2e')
+            h1e=self.h1e
+            h2e=self.h2e
+#            h_core=self.mf.get_hcore()
+#            h1e = h_core
+#            h2e = self.mol.intor('int2e')
 
         if hf_core:
             self.mf.run() # HF to get orb and occ
@@ -698,7 +715,7 @@ class EnginePyscf(Engine):
             else:
                 print('2RDM-correlated trace is ZERO')
 
-            h1_c=np.einsum('ij,ji', h1e, delta_gamma)
+            h1_c=np.einsum('ij,ji', h1e, delta_gamma,optimize=True)
             h2_c=np.einsum('ijkl,ijkl', h2e, gammac,optimize=True) * .5
             etotal = self.mf.e_tot + h1_c + h2_c
             print('HF:', self.mf.e_tot,' ','Con_H1: ', h1_c, 'Con_H2: ', h2_c)
@@ -714,9 +731,13 @@ class EnginePyscf(Engine):
             etotal = h1_c + h2_g1 + h2_cum
             etotal += self.mol.energy_nuc()
             print('Con_H1: ', h1_c, 'Con_H2_g1: ', h2_g1, 'Con_H2_Cum: ', h2_cum)
-        else:
+
+        if hf_core is False and cum is False:
             h1_c=np.einsum('ij,ji', h1e, gamma,optimize=True)
             h2_c=np.einsum('ijkl,ijkl', h2e, gamma2,optimize=True) * .5
+#            temp = np.tensordot(h2e, gamma2, axes=([2,3],[2,3]))  # shape (M,M,M,M) -> (M,M)
+#            h2_c = 0.5 * np.tensordot(temp, np.eye(temp.shape[0]), axes=2) 
+
             etotal = h1_c + h2_c
             etotal += self.mol.energy_nuc()
             print('Con_H1: ', h1_c, 'Con_H2: ', h2_c)
@@ -1096,10 +1117,133 @@ class EnginePyscf(Engine):
             de[k] -= np.einsum('xij,ji->x', s1[:,p0:p1], vhf_s1occ[:,p0:p1],optimize=True) * 2
      
         return de
+
+    def grad_elec_static(self, gamma=None, gamma2=None, ncas=None, nelecs=None,
+                     atmlst=None, fci=True, **kwargs):
+        mc_grad = self.mf.nuc_grad_method()
+        mo_coeff = self.mf.mo_coeff
+        mol = self.mf.mol
+        
+        if fci:    
+            ncas = len(self.mf.mo_coeff)
+            neleca, nelecb = mol.nelec
+            nelecas = (neleca, nelecb)
+            ncore = 0
+            nocc = ncas
+        else:
+            nelecb = (nelecs-self.mf.mol.spin)//2
+            neleca = nelecs - nelecb
+            nelecas = (neleca, nelecb)
+            ncorelec = self.mf.mol.nelectron - sum(nelecas)
+            ncore = ncorelec // 2
+            nocc = ncore + ncas
+            
+        nao, nmo = mo_coeff.shape
+        nao_pair = nao * (nao+1) // 2
+        mo_energy = self.mf.mo_energy
+     
+        mo_occ = mo_coeff[:,:nocc]
+        mo_core = mo_coeff[:,:ncore]
+        mo_cas = mo_coeff[:,ncore:nocc]
+        neleca, nelecb = mol.nelec
+        assert (neleca == nelecb)
+        orbo = mo_coeff[:,:neleca]
+        orbv = mo_coeff[:,neleca:]
+        
+        ####
+        #convert AO to MO first... 
+        inv_coeff = np.linalg.inv(mo_coeff)
+        gamma_mo = np.einsum('pi,ij,qj->pq', inv_coeff, gamma, inv_coeff.conj(),
+                             optimize=True)
+        gamma2_mo = np.einsum('ijkl,pi,qj,rk,sl->pqrs', gamma2 ,
+                           inv_coeff, inv_coeff, inv_coeff, inv_coeff, optimize=True)
+     
+        casdm1 = gamma_mo[ncore:ncore+ncas,ncore:ncore+ncas]
+        casdm2 = gamma2_mo[ncore:ncore+ncas,ncore:ncore+ncas,
+                           ncore:ncore+ncas,ncore:ncore+ncas]
+        #####
+        
+        dm_core = np.dot(mo_core, mo_core.T) * 2
+        dm_cas = reduce(np.dot, (mo_cas, casdm1, mo_cas.T))
+        aapa = ao2mo.kernel(mol, (mo_cas, mo_cas, mo_coeff, mo_cas), compact=False)
+        aapa = aapa.reshape(ncas,ncas,nmo,ncas)
+        vj, vk = self.mf.get_jk(mol, (dm_core, dm_cas))
+        h1 = self.mf.get_hcore()
+        vhf_c = vj[0] - vk[0] * .5
+        vhf_a = vj[1] - vk[1] * .5
+        # Imat = h1_{pi} gamma1_{iq} + h2_{pijk} gamma_{iqkj}
+        Imat = np.zeros((nmo,nmo))
+        Imat[:,:nocc] = reduce(np.dot, (mo_coeff.T, h1 + vhf_c + vhf_a, mo_occ)) * 2
+        Imat[:,ncore:nocc] = reduce(np.dot, (mo_coeff.T, h1 + vhf_c, mo_cas, casdm1))
+        Imat[:,ncore:nocc] += lib.einsum('ijpk,jikq->pq', aapa, casdm2)
+        aapa = vj = vk = vhf_c = vhf_a = h1 = None
+     
+        ee = mo_energy[:,None] - mo_energy
+     
+        Imat[:ncore,ncore:neleca] = 0
+        Imat[ncore:neleca,:ncore] = 0
+        Imat[nocc:,neleca:nocc] = 0
+        Imat[neleca:nocc,nocc:] = 0
+        Imat[neleca:,:neleca] = Imat[:neleca,neleca:].T
+        im1 = reduce(np.dot, (mo_coeff, Imat, mo_coeff.T))
+     
+        casci_dm1 = dm_core + dm_cas
+        hf_dm1 = self.mf.make_rdm1(mo_coeff, self.mf.mo_occ)
+        hcore_deriv = mc_grad.hcore_generator(mol)
+        s1 = mc_grad.get_ovlp(mol)
+     
+        diag_idx = np.arange(nao)
+        diag_idx = diag_idx * (diag_idx+1) // 2 + diag_idx
+        casdm2_cc = casdm2 + casdm2.transpose(0,1,3,2)
+        dm2buf = ao2mo._ao2mo.nr_e2(casdm2_cc.reshape(ncas**2,ncas**2), mo_cas.T,
+                                    (0, nao, 0, nao)).reshape(ncas**2,nao,nao)
+        dm2buf = lib.pack_tril(dm2buf)
+        dm2buf[:,diag_idx] *= .5
+        dm2buf = dm2buf.reshape(ncas,ncas,nao_pair)
+        casdm2 = casdm2_cc = None
+     
+        if atmlst is None:
+            atmlst = range(mol.natm)
+        aoslices = mol.aoslice_by_atom()
+        de = np.zeros((len(atmlst),3))
+     
+        for k, ia in enumerate(atmlst):
+            shl0, shl1, p0, p1 = aoslices[ia]
+            h1ao = hcore_deriv(ia)
+            de[k] += np.einsum('xij,ij->x', h1ao, casci_dm1,optimize=True)
+     
+            q1 = 0
+            for b0, b1, nf in _shell_prange(mol, 0, mol.nbas, nao):
+                q0, q1 = q1, q1 + nf
+                dm2_ao = lib.einsum('ijw,pi,qj->pqw', dm2buf, mo_cas[p0:p1], mo_cas[q0:q1])
+                shls_slice = (shl0,shl1,b0,b1,0,mol.nbas,0,mol.nbas)
+                eri1 = mol.intor('int2e_ip1', comp=3, aosym='s2kl',
+                                 shls_slice=shls_slice).reshape(3,p1-p0,nf,nao_pair)
+                de[k] -= np.einsum('xijw,ijw->x', eri1, dm2_ao,optimize=True) * 2
+     
+                for i in range(3):
+                    eri1tmp = lib.unpack_tril(eri1[i].reshape((p1-p0)*nf,-1))
+                    eri1tmp = eri1tmp.reshape(p1-p0,nf,nao,nao)
+                    
+                    de[k,i] -= np.einsum('ijkl,lk,ij', eri1tmp, dm_core[q0:q1],
+                                         casci_dm1[p0:p1],optimize=True) * 2
+                    de[k,i] += np.einsum('ijkl,jk,il', eri1tmp, dm_core[q0:q1],
+                                         casci_dm1[p0:p1],optimize=True)
+                    de[k,i] -= np.einsum('ijkl,lk,ij', eri1tmp, dm_cas[q0:q1],
+                                         dm_core[p0:p1],optimize=True) * 2
+                    de[k,i] += np.einsum('ijkl,jk,il', eri1tmp, dm_cas[q0:q1],
+                                         dm_core[p0:p1],optimize=True)
+                eri1 = eri1tmp = None
+    
+            de[k] -= np.einsum('xij,ij->x', s1[:,p0:p1], im1[p0:p1],optimize=True)
+            de[k] -= np.einsum('xij,ji->x', s1[:,p0:p1], im1[:,p0:p1],optimize=True)
+     
+        return de
      
     def get_forces_fci(self,gamma=None,gamma2=None,ncas=None,nelecas=None,fci=True,**kwargs):
         atmlst = range(self.mf.mol.natm)
-        de = self.grad_elec(gamma=gamma, gamma2=gamma2,
+#        de = self.grad_elec(gamma=gamma, gamma2=gamma2,
+        de = self.grad_elec_static(gamma=gamma, gamma2=gamma2,
            ncas=ncas, nelecs=nelecas, atmlst = atmlst, fci=fci)
         forc_t=-1.0*(de+self.mf.nuc_grad_method().grad_nuc(self.mf.mol,atmlst=atmlst)) 
         #Adding gradient of the Nuclei-nuclei repulsion!
@@ -1212,3 +1356,4 @@ def get_atom_naos(mol):
         naos.append(n)
     naos = np.asarray(naos)
     return naos
+

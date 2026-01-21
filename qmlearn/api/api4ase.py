@@ -221,28 +221,20 @@ class QMLCalculator(Calculator):
         """                  
         shape = self.qmmodel.refqmmol.vext.shape
         shape2 = (shape[0],) * 4
-        gamma_d_ = self.qmmodel.predict(qmmol,               
-                       model=self.qmmodel.mmodels['delta_gamma']).reshape(shape) 
-        if self.qmmodel.purify_gamma :
-             gamma_fp, gamma_d = qmmol.engine.purify_d_gamma(gamma_d=gamma_d_)
-        else:
-             gamma_fp, gamma_d = qmmol.engine.purify_d_gamma(gamma_d=gamma_d_,pure=False)
-#        gamma_fp = self.qmmodel.convert_back(gamma_fp_, prop='gamma')
-#        gamma_d = self.qmmodel.convert_back(gamma_d__, prop='gamma')
-                                                                                         
-        gamma2c_ = self.qmmodel2.predict(qmmol,
-                                 model=self.qmmodel2.mmodels['gamma2c']).reshape(shape2)
-        if self.qmmodel.purify_Gamma :
-            gamma2 , gamma2c = qmmol.engine.purify_gamma2c(gamma=gamma_fp,gamma2c=gamma2c_) 
-        else:
-            gamma2 , gamma2c = qmmol.engine.purify_gamma2c(gamma=gamma_fp,gamma2c=gamma2c_,pure=False)
+        
+        gamma2c_ = self.qmmodel.predict(qmmol,
+                                 model=self.qmmodel.mmodels['gamma2c']).reshape(shape2)
+
+        delta_gamma = qmmol.engine.gamma1_f_gamma2(gamma2c_)
+
+        gamma_fp, gamma_d = qmmol.engine.purify_d_gamma(gamma_d=delta_gamma,pure=True)
+        
+        gamma2 , gamma2c = qmmol.engine.purify_gamma2c(gamma=gamma_fp,gamma2c=gamma2c_,pure=True)
 
         if 'gamma' in properties:
             self.results['gamma'] = gamma_fp
         if 'gamma2c' in properties:
             self.results['gamma2c'] = gamma2c
-        if 'delta_gamma' in properties:
-            self.results['delta_gamma'] = gamma_d
         if 'gamma2' in properties:
             self.results['gamma2'] = gamma2
 
