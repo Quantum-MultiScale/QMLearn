@@ -125,6 +125,7 @@ class QMMol(object):
         use_reflection=self.init_kwargs.get('use_reflection', True)
         ignore_hydrogen=self.init_kwargs.get('ignore_hydrogen', False)
         ci_ref=self.init_kwargs.get('ci_ref',None)
+        smearing=self.init_kwargs.get('smearing',None)
         #-----------------------------------------------------------------------
         self.op_rotate = np.eye(3)
         self.op_translate = np.zeros(3)
@@ -177,6 +178,7 @@ class QMMol(object):
                 engine_options['nelecas'] = nelecas
                 engine_options['nroots'] = nroots
                 engine_options['ci_ref'] = ci_ref
+                engine_options['smearing'] = smearing
                 if isinstance(xc, (str, type(None))) :
                     engine_options['xc'] = xc
                 elif isinstance(xc, (list, tuple, set)):

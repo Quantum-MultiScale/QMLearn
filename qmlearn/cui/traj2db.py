@@ -66,6 +66,9 @@ def get_args():
                         default=False, help='If "Yes" will multiply gamma and Gamma by np.linalg.inv(vext)')
     parser.add_argument('--mom', dest='mom', type=bool, action='store',
                         default=False, help='If "Yes" MOM will be apply taking as Reference: refqmmol') 
+    parser.add_argument('--smearing', dest='smearing', type=bool, action='store',
+                        default=False, help='If "Yes" will smear HF')
+
     args = parser.parse_args()
     return args
 
@@ -96,6 +99,7 @@ def run(args):
     masses = args.masses
     inv = args.inv
     mom = args.mom
+    smearing =  args.smearing
     #-----------------------------------------------------------------------
     trajs = list(OrderedDict.fromkeys(trajs))
     print(f'Input files are : {trajs}')
@@ -125,6 +129,7 @@ def run(args):
             'ci_ref' : ci_ref,
             'dm0' : dm0,
             'masses' : masses,
+            'smearing' : smearing,
             }
 
     #print(qmmol_options)

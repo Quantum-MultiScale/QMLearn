@@ -88,6 +88,7 @@ class EnginePyscf(Engine):
         self.method = self.options.get('method', 'rks').lower()
         charge = self.options.get('charge', None)
         symmetry = self.options.get('symmetry',False)
+        smearing = self.options.get('smearing',False)
         #ao_repr = self.options.get('ao_repr', True)
         #
         if isinstance(self.method, str):
@@ -103,6 +104,9 @@ class EnginePyscf(Engine):
             mf = methods_pyscf[self.method.split('+')[0]](mol)
             mf.xc = xc
             mf.verbose = verbose
+        if smearing:
+#            print(f"Using smearing: {smearing}")
+            mf = scf.addons.smearing_(mf, sigma=0.094, method='fermi')
         self.mf = mf
         self.mol = self.mf.mol
         self.h1e = self.mf.get_hcore()
@@ -173,9 +177,15 @@ class EnginePyscf(Engine):
                 self.mf.run(dm0=dm0_ref)
             else:
                 self.mf.run()
-            self.occs = self.mf.get_occ()
-            norb = self.occs.shape[0]
+
             self._mo_energy = self.mf.mo_energy
+            smearing = self.options.get('smearing',False)
+            if smearing:
+                self.occs = self.mf.get_occ(mo_energy=self._mo_energy)
+            else:
+                self.occs = self.mf.get_occ()
+            norb = self.occs.shape[0]
+            
             #
             if '+' in self.method :
                 method2 = self.method.split('+')[1]
@@ -291,7 +301,7 @@ class EnginePyscf(Engine):
                     mf2.fcisolver.nroots = nroots
                     
                     #mf2.sorting_mo_energy = True
-                    print('Check: ', properties)
+                    #print('Check: ', properties)
                     if ci_ref is not None:
                         print('Using CI REF! ')
                         mf2.kernel(ci0=ci_ref)
@@ -780,7 +790,12 @@ class EnginePyscf(Engine):
         gf.verbose = mf.verbose
         if hasattr(gf, 'grid_response') :
             gf.grid_response = True
-        forces = -1.0 * gf.kernel()
+        smearing = self.options.get('smearing',False)
+        if smearing:    
+            # avoid use CPHF equations
+            forces = self.get_forces_fci(gamma=self.gamma,gamma2=self.gamma2)
+        else:
+            forces = -1.0 * gf.kernel()
         return forces
 
     def calc_forces(self, gamma, **kwargs):
