@@ -125,7 +125,9 @@ class QMMol(object):
         use_reflection=self.init_kwargs.get('use_reflection', True)
         ignore_hydrogen=self.init_kwargs.get('ignore_hydrogen', False)
         ci_ref=self.init_kwargs.get('ci_ref',None)
-        smearing=self.init_kwargs.get('smearing',None)
+        smearing=self.init_kwargs.get('smearing', False)
+        mom=self.init_kwargs.get('mom', False)
+        ref_qmmol = self.init_kwargs.get('ref_qmmol',None)
         #-----------------------------------------------------------------------
         self.op_rotate = np.eye(3)
         self.op_translate = np.zeros(3)
@@ -179,6 +181,8 @@ class QMMol(object):
                 engine_options['nroots'] = nroots
                 engine_options['ci_ref'] = ci_ref
                 engine_options['smearing'] = smearing
+                engine_options['mom'] = mom
+                engine_options['ref_qmmol'] = ref_qmmol
                 if isinstance(xc, (str, type(None))) :
                     engine_options['xc'] = xc
                 elif isinstance(xc, (list, tuple, set)):
@@ -238,6 +242,7 @@ class QMMol(object):
 
     def run(self, **kwargs):
         r"""Function to run the External Calculator."""
+        print("Kwargs ", kwargs)
         self.engine.run(**kwargs)
 
     def rotmat(self, factor=None, angle=None, **kwargs):

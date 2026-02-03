@@ -171,7 +171,7 @@ def build_properties(images, properties = None, refqmmol = None, qmmol_options =
                 refqmmol = refqmmol, qmmol_options = qmmol_options, **kwargs)
     return data
 
-def append_properties(atoms, data = None, properties = None, refqmmol = None, qmmol_options = {}, inv = False, mom = False, **kwargs):
+def append_properties(atoms, data = None, properties = None, refqmmol = None, ref_qmmol=None, qmmol_options = {}, inv = False, mom = False, smearing = False, **kwargs):
     from qmlearn.drivers.mol import QMMol
     #
     if data is None :
@@ -181,17 +181,17 @@ def append_properties(atoms, data = None, properties = None, refqmmol = None, qm
     #
     if isinstance(atoms, QMMol):
         qmmol = atoms
-        if refqmmol is not None and mom:
-            refqmmol.engine.mf.run()
-            qmmol.run(refqmmol = refqmmol, mom = mom, properties = properties, **kwargs)
+        if ref_qmmol is not None and mom:
+            ref_qmmol.engine.mf.run()
+            qmmol.run(properties = properties, ref_qmmol = ref_qmmol, smearing = smearing, mom=mom, **kwargs)
     else :
         if refqmmol is not None and mom is False:
             qmmol = refqmmol.duplicate(atoms, refatoms=atoms)
             qmmol.run(**kwargs)
-        elif refqmmol is not None and mom:
+        elif ref_qmmol is not None and mom:
             qmmol = QMMol(atoms = atoms, **qmmol_options)
-            refqmmol.engine.mf.run()
-            qmmol.run(refqmmol = refqmmol, mom = mom, **kwargs)
+            ref_qmmol.engine.mf.run()
+            qmmol.run(ref_qmmol = ref_qmmol, mom = mom, smearing = smearing, **kwargs)
         else :
             qmmol = QMMol(atoms = atoms, **qmmol_options)
             qmmol.run(**kwargs)
@@ -218,6 +218,8 @@ def append_properties(atoms, data = None, properties = None, refqmmol = None, qm
         elif key == 'ovlp' :
             data[key].append(qmmol.engine.ovlp)
         elif key == 'gamma2':
+            if smearing:
+                qmmol.engine.mf = None
             if inv:
                 print("Running Vinv")
                 vinv = np.linalg.inv(qmmol.engine.vext)
@@ -228,6 +230,8 @@ def append_properties(atoms, data = None, properties = None, refqmmol = None, qm
             else:
                 data[key].append(qmmol.engine.gamma2)
         elif key == 'gamma2c':
+            if smearing:
+                qmmol.engine.mf = None
             if inv:
                 print("Running Vinv")
                 vinv = np.linalg.inv(qmmol.engine.vext)
@@ -238,15 +242,17 @@ def append_properties(atoms, data = None, properties = None, refqmmol = None, qm
             else:
                 data[key].append(qmmol.engine.gamma2c)
         elif key == 'gamma2cum':
-             if inv: 
-                print("Running Vinv")
-                vinv = np.linalg.inv(qmmol.engine.vext)
-                gamma2cum_inv = np.einsum('pa,qb,abcd->pqcd',
-                                        vinv, vinv, qmmol.engine.gamma2cum
-                                        ,optimize=True)
-                data[key].append(gamma2cum_inv)
-             else:
-                data[key].append(qmmol.engine.gamma2cum)
+            if smearing:
+               qmmol.engine.mf = None
+            if inv: 
+               print("Running Vinv")
+               vinv = np.linalg.inv(qmmol.engine.vext)
+               gamma2cum_inv = np.einsum('pa,qb,abcd->pqcd',
+                                       vinv, vinv, qmmol.engine.gamma2cum
+                                       ,optimize=True)
+               data[key].append(gamma2cum_inv)
+            else:
+               data[key].append(qmmol.engine.gamma2cum)
         elif key == 'delta_gamma':
             if inv:
                 vinv = np.linalg.inv(qmmol.engine.vext)

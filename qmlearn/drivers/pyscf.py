@@ -89,6 +89,8 @@ class EnginePyscf(Engine):
         charge = self.options.get('charge', None)
         symmetry = self.options.get('symmetry',False)
         smearing = self.options.get('smearing',False)
+        mom = self.options.get('mom',False)
+        ref_qmmol = self.options.get('ref_qmmol',None)
         #ao_repr = self.options.get('ao_repr', True)
         #
         if isinstance(self.method, str):
@@ -104,9 +106,6 @@ class EnginePyscf(Engine):
             mf = methods_pyscf[self.method.split('+')[0]](mol)
             mf.xc = xc
             mf.verbose = verbose
-        if smearing:
-#            print(f"Using smearing: {smearing}")
-            mf = scf.addons.smearing_(mf, sigma=0.094, method='fermi')
         self.mf = mf
         self.mol = self.mf.mol
         self.h1e = self.mf.get_hcore()
@@ -149,7 +148,8 @@ class EnginePyscf(Engine):
             mol = gto.M(atom = atom, basis=basis, charge = charge,symmetry=symmetry, parse_arg = False)
         return mol
 
-    def run(self, properties = ('energy', 'forces'), ao_repr=True, eig=True, singlet=True, mom=False, refqmmol=None, **kwargs):
+    def run(self, properties = ('energy', 'forces'), ao_repr=True, eig=True, singlet=True,
+             mom=False, ref_qmmol=None, smearing=False, **kwargs):
         r""" Caculate electronic properties using PySCF.
 
         Parameters
@@ -172,20 +172,56 @@ class EnginePyscf(Engine):
         """
         if 'energy' in properties or self._gamma is None :
             # (dft.uks.UKS, dft.rks.RKS, scf.uhf.UHF, scf.hf.RHF))
+            mom = self.options.get('mom',False)
+            smearing = self.options.get('smearing',False)
+            ref_qmmol = self.options.get('ref_qmmol',None)
+
+            if smearing:
+                if self.mf is None:
+                   self.init()
+                mf_ref_occ = np.zeros(self.mol.nao)
+                nelec =  self.mol.nelectron
+                nocc = nelec // 2
+                mf_ref_occ[:nocc] = 2.0
+             
+                mf = scf.addons.smearing_(self.mf, sigma=0.13, method='fermi')
+                self.mf = mf
+     
             dm0_ref = self.options.get('dm0',None)
             if dm0_ref is not None:
                 self.mf.run(dm0=dm0_ref)
             else:
                 self.mf.run()
 
+            if mom:
+                mol_ref = ref_qmmol.engine.mol
+                mo_ref = ref_qmmol.engine.mf.mo_coeff
+                occ_ref = ref_qmmol.engine.mf.mo_occ
+
+                tracker = MOMOrbitalTracker(mol_ref, mo_ref)
+                mo_new, perm = tracker.reorder(self.mf.mo_coeff)
+                self.mf.mo_coeff = mo_new
+                self.mf.mo_occ = mf_ref_occ
+                self.mf.mo_energy = self.mf.mo_energy[perm]
+
             self._mo_energy = self.mf.mo_energy
-            smearing = self.options.get('smearing',False)
-            if smearing:
+            self._orb = self.mf.mo_coeff
+            if smearing and mom is False:
+                print(f"Using smearing: {smearing}")
                 self.occs = self.mf.get_occ(mo_energy=self._mo_energy)
+                self._rdm1_hf = self.mf.make_rdm1(self._orb, mf_ref_occ)
+            elif smearing and mom:
+                print(f"Using smearing: {smearing} and MOM: {mom}")
+                self.occs = self.mf.get_occ(mo_energy=self._mo_energy)
+                self._rdm1_hf = self.mf.make_rdm1(self._orb, mf_ref_occ)
             else:
                 self.occs = self.mf.get_occ()
+                self._rdm1_hf = self.mf.make_rdm1(ao_repr = ao_repr, **kwargs)
+
             norb = self.occs.shape[0]
-            
+            self._gamma = self._rdm1_hf
+            self._etotal = self.mf.e_tot
+
             #
             if '+' in self.method :
                 method2 = self.method.split('+')[1]
@@ -210,7 +246,6 @@ class EnginePyscf(Engine):
                         #
                     else:
                         e, ci_ = mf2.kernel()
-                    self._orb = self.mf.mo_coeff
                     self._etotal = e
                     #
                     if 'gamma2' in properties or 'gamma2c' in properties :
@@ -236,12 +271,12 @@ class EnginePyscf(Engine):
                          use_cumulant = 'gamma2cum' in properties
                          print('Cumulant Gamma2' if use_cumulant else 'Correlated Gamma2')
 
-                         gamma_ref = self._gamma if use_cumulant else self.mf.make_rdm1(ao_repr = ao_repr)
+                         gamma_ref = self._gamma if use_cumulant else self._rdm1_hf
                          gamma_a = np.einsum('pq,rs->pqrs',gamma_ref,gamma_ref)
                          gamma_b = np.einsum('pq,rs->psrq',gamma_ref,gamma_ref)
 
                          self._gamma2c = self._gamma2 - .5*(2*gamma_a-gamma_b)
-                         self._delta_gamma = self._gamma - self.mf.make_rdm1(ao_repr = ao_repr)
+                         self._delta_gamma = self._gamma - self._rdm1_hf
                          self._occ_dg = self.calc_occupations(self._delta_gamma)[0]
                          if eig:
                             self._eig_gamma2c = self.eigs_gamma2(self._gamma2c)[0]
@@ -253,7 +288,6 @@ class EnginePyscf(Engine):
                     mf2 = ci.CISD(self.mf)
                     eris = cc.ccsd._make_eris_outcore(mf2, self.mf.mo_coeff)
                     ecisd, civec = mf2.kernel(eris=eris)
-                    self._orb = self.mf.mo_coeff
 
                     if 'gamma2' in properties or 'gamma2c' in properties:
                          self._gamma = mf2.make_rdm1(civec,ao_repr=ao_repr)
@@ -271,12 +305,12 @@ class EnginePyscf(Engine):
                          use_cumulant = 'gamma2cum' in properties
                          print('Cumulant Gamma2' if use_cumulant else 'Correlated Gamma2')
 
-                         gamma_ref = self._gamma if use_cumulant else self.mf.make_rdm1(ao_repr = ao_repr)
+                         gamma_ref = self._gamma if use_cumulant else self._rdm1_hf
                          gamma_a = np.einsum('pq,rs->pqrs',gamma_ref,gamma_ref)
                          gamma_b = np.einsum('pq,rs->psrq',gamma_ref,gamma_ref)
 
                          self._gamma2c = self._gamma2 - .5*(2*gamma_a-gamma_b)
-                         self._delta_gamma = self._gamma - self.mf.make_rdm1(ao_repr = ao_repr)
+                         self._delta_gamma = self._gamma - self._rdm1_hf
                          self._occ_dg = self.calc_occupations(self._delta_gamma)[0]
                          if eig:
                             self._eig_gamma2c = self.eigs_gamma2(self._gamma2c)[0]
@@ -305,18 +339,6 @@ class EnginePyscf(Engine):
                     if ci_ref is not None:
                         print('Using CI REF! ')
                         mf2.kernel(ci0=ci_ref)
-                    elif mom:
-                        print('Using MOM method: ')
-                        mol_ref = refqmmol.engine.mol
-                        mo_ref = refqmmol.engine.mf.mo_coeff
-                        
-                        tracker = MOMOrbitalTracker(mol_ref, mo_ref)
-                        mo_new, perm = tracker.reorder(self.mf.mo_coeff)
-                        self.mf.mo_coeff = mo_new
-                        self.mf.mo_occ = self.mf.mo_occ[perm]
-                        self.mf.mo_energy = self.mf.mo_energy[perm]
-                        mf2 = methods_pyscf[method2](self.mf, ncas, nelecas)
-                        mf2.kernel()
                     else:
                         mf2.kernel()
 
@@ -352,7 +374,7 @@ class EnginePyscf(Engine):
                         self._gamma2c = self.calc_gamma2_cas(properties=properties, ao_repr = ao_repr,  
                                                              ncas=ncas, nelecas=nelecas)
                     if has_gamma2c or has_gamma2cum:
-                       self._delta_gamma = self._gamma - self.mf.make_rdm1(ao_repr = ao_repr)
+                       self._delta_gamma = self._gamma - self._rdm1_hf
                        self._occ_dg = self.calc_occupations(self._delta_gamma)[0]
 
                     if eig:
@@ -361,7 +383,6 @@ class EnginePyscf(Engine):
                        if has_gamma2c:
                            self._eig_gamma2c = self.eigs_gamma2(self._gamma2c)[0]
 
-                    self._orb = self.mf.mo_coeff
                     self._etotal = mf2.e_tot
                     
                     print('CASCI E: ', self._etotal)
@@ -369,7 +390,6 @@ class EnginePyscf(Engine):
                     mf2 = methods_pyscf[method2](self.mf)
                     mf2.verbose = self.mf.verbose
                     mf2.run()
-                    self._orb = self.mf.mo_coeff
                     self._gamma = mf2.make_rdm1(ao_repr = ao_repr, **kwargs)
                     print('METHOD: ',method2)
                     self._gamma2 = mf2.make_rdm2(ao_repr = ao_repr, **kwargs)
@@ -380,12 +400,12 @@ class EnginePyscf(Engine):
                          use_cumulant = 'gamma2cum' in properties
                          print('Cumulant Gamma2' if use_cumulant else 'Correlated Gamma2')
 
-                         gamma_ref = self._gamma if use_cumulant else self.mf.make_rdm1(ao_repr = ao_repr)
+                         gamma_ref = self._gamma if use_cumulant else self._rdm1_hf
                          gamma_a = np.einsum('pq,rs->pqrs',gamma_ref,gamma_ref)
                          gamma_b = np.einsum('pq,rs->psrq',gamma_ref,gamma_ref)
 
                          self._gamma2c = self._gamma2 - .5*(2*gamma_a-gamma_b)
-                         self._delta_gamma = self._gamma - self.mf.make_rdm1(ao_repr = ao_repr)
+                         self._delta_gamma = self._gamma - self._rdm1_hf
                          self._occ_dg = self.calc_occupations(self._delta_gamma)[0]
                          if eig: 
                             self._eig_gamma2c = self.eigs_gamma2(self._gamma2c)[0]
@@ -398,12 +418,14 @@ class EnginePyscf(Engine):
                 self._etotal_c = self._etotal - self.mf.e_tot
             else :
                 mf = self.mf
-                self._orb = mf.mo_coeff
-                self._gamma = mf.make_rdm1(ao_repr = ao_repr, **kwargs)
-                self._etotal = mf.e_tot
 
         if 'forces' in properties :
-            self._forces = self.run_forces()
+            if mom or smearing:
+                self.init() 
+                self.mf.run()
+                self._forces = self.run_forces()
+            else:
+                self._forces = self.run_forces()
 
     def calc_gamma_trans(self, properties, ao_repr=True, ncas=None,nelecas=None,*kwargs):
 
@@ -478,7 +500,7 @@ class EnginePyscf(Engine):
             use_cumulant = 'gamma2cum' in properties
             print('Cumulant Gamma2' if use_cumulant else 'Correlated Gamma2')
 
-            gamma_ref = self._gamma if use_cumulant else self.mf.make_rdm1(ao_repr=ao_repr)
+            gamma_ref = self._gamma if use_cumulant else self._rdm1_hf
 
             inv= np.linalg.inv(mo_coeff)
             gamma_ = np.einsum('pi,ij,qj->pq', inv, gamma_ref, inv.conj(),optimize=True) # MO basis
@@ -600,8 +622,13 @@ class EnginePyscf(Engine):
 
     @property
     def forces(self):
+        mom = self.options.get('mom',False)
+        smearing = self.options.get('smearing',False)
         if self._forces is None:
-            self.run(properties = ('forces'))
+           if mom or smearing:
+              self.init() 
+              self.mf.run()
+           self.run(properties = ('forces'))
         return self._forces
 
     @property
@@ -768,7 +795,16 @@ class EnginePyscf(Engine):
         -------
         dip : list
             The dipole moment on x, y and z component."""
+        if self.mf is None :
+           self.init()
         dip = self.mf.dip_moment(self.mol, gamma, unit = 'au', verbose=self.mf.verbose)
+        return dip
+
+    def calc_dipole_orb(self,mo_coeff=None, **kwargs):
+        r""" Calc magnitud of dipole"""
+        mo_coeff = self.mf.mo_coeff
+        dip_int = self.mol.intor('int1e_r')
+        dip = np.einsum('imn, jm, jn -> ij', dip_int, mo_coeff, mo_coeff, optimize = True)
         return dip
 
     def run_forces(self, **kwargs):
@@ -791,7 +827,7 @@ class EnginePyscf(Engine):
         if hasattr(gf, 'grid_response') :
             gf.grid_response = True
         smearing = self.options.get('smearing',False)
-        if smearing:    
+        if smearing and self.method.split('+')[0] not in ['hf']:    
             # avoid use CPHF equations
             forces = self.get_forces_fci(gamma=self.gamma,gamma2=self.gamma2)
         else:

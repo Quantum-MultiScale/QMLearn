@@ -448,6 +448,7 @@ class Engine(object):
 
         """
         if gamma_hf is None:
+           print("Calculating HF")
            self.mf.run()
            gamma_hf = self.mf.make_rdm1()
         #ove = self.ovlp
@@ -778,7 +779,7 @@ def minimize_rmsd_operation(target, atoms, stereo = True, rotate_method = 'kabsc
         rotate = get_match_rotate(atoms1, atoms2, rotate_method = rotate_method)
         atoms2.positions[:] = np.dot(atoms2.positions[:], rotate)
         rmsd = diff_coords(atoms1.positions, atoms2.positions)
-        print('indices: ', indices, rmsd, 'rotated_method: ', rotate_method)
+        #print('indices: ', indices, rmsd, 'rotated_method: ', rotate_method)
         if rmsd < rmsd_final_min :
             rmsd_final_min = rmsd
             rmsd_final_rotate = rotate

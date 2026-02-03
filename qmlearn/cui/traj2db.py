@@ -68,7 +68,6 @@ def get_args():
                         default=False, help='If "Yes" MOM will be apply taking as Reference: refqmmol') 
     parser.add_argument('--smearing', dest='smearing', type=bool, action='store',
                         default=False, help='If "Yes" will smear HF')
-
     args = parser.parse_args()
     return args
 
@@ -110,7 +109,7 @@ def run(args):
     if merge :
         return merge_db(trajs, output=output)
 
-    properties.extend(['vext', 'gamma', 'energy', 'forces', 'dipole'])
+    properties.extend(['vext', 'gamma', 'energy', 'dipole', 'forces'])
     index = slice(istart, iend)
     qmmol_options = {
             'basis' : basis,
@@ -130,6 +129,7 @@ def run(args):
             'dm0' : dm0,
             'masses' : masses,
             'smearing' : smearing,
+            'mom' : mom,
             }
 
     #print(qmmol_options)
@@ -147,12 +147,21 @@ def run(args):
         if masses is not None: atoms.masses = masses
         qmmol = QMMol(atoms = atoms, **qmmol_options)
 #        if reorder_method is not None: qmmol = qmmol.duplicate(atoms)
-        if i == 0 : refqmmol = qmmol
-        if mom:
-#          print("Using MOM: ", mom)
-          data = append_properties(qmmol, data = data, inv = inv, refqmmol = refqmmol, mom = mom) 
+        if i == 0:
+           refqmmol = qmmol
+           ref_qmmol = qmmol
+        if mom and smearing:
+           if i == 0:
+              qmmol.engine.options['mom']= False
+              data = append_properties(qmmol, data = data, inv = inv, mom = mom, smearing = smearing)
+           else:
+              print(f"Using MOM: {mom} and Smearing: {smearing}")
+              qmmol.engine.options['ref_qmmol'] = ref_qmmol
+              data = append_properties(qmmol, data = data, inv = inv, ref_qmmol = ref_qmmol, mom = mom, smearing = smearing) 
+        elif smearing and not mom:
+           data = append_properties(qmmol, data = data, inv = inv, ref_qmmol = ref_qmmol, mom = mom, smearing = smearing)
         else:
-          data = append_properties(qmmol, data = data, inv = inv)
+           data = append_properties(qmmol, data = data, inv = inv)
 
     write_db(output, refqmmol, train_atoms, data)
 
