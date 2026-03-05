@@ -170,6 +170,7 @@ class EnginePyscf(Engine):
             If True, will use atomic orbitals for calculating electronic properties
 
         """
+        print('PROPERTIES: ', properties)
         if 'energy' in properties or self._gamma is None :
             # (dft.uks.UKS, dft.rks.RKS, scf.uhf.UHF, scf.hf.RHF))
             mom = self.options.get('mom',False)
@@ -281,6 +282,9 @@ class EnginePyscf(Engine):
                          if eig:
                             self._eig_gamma2c = self.eigs_gamma2(self._gamma2c)[0]
 
+                    if 'delta_gamma' in properties:
+                       self._delta_gamma = self._gamma - self._rdm1_hf
+
                     print('FCI energy: ', self._etotal)
                     self.mf2 = mf2
 
@@ -314,6 +318,9 @@ class EnginePyscf(Engine):
                          self._occ_dg = self.calc_occupations(self._delta_gamma)[0]
                          if eig:
                             self._eig_gamma2c = self.eigs_gamma2(self._gamma2c)[0]
+                    
+                    if 'delta_gamma' in properties:
+                       self._delta_gamma = self._gamma - self._rdm1_hf
 
                     self._occ = self.calc_occupations(self._gamma)[0]
                     self._etotal = mf2.e_tot
@@ -377,6 +384,9 @@ class EnginePyscf(Engine):
                        self._delta_gamma = self._gamma - self._rdm1_hf
                        self._occ_dg = self.calc_occupations(self._delta_gamma)[0]
 
+                    if 'delta_gamma' in properties:
+                       self._delta_gamma = self._gamma - self._rdm1_hf
+
                     if eig:
                        if has_gamma2:
                            self._eig_gamma2 = self.eigs_gamma2(self._gamma2)[0]
@@ -409,6 +419,9 @@ class EnginePyscf(Engine):
                          self._occ_dg = self.calc_occupations(self._delta_gamma)[0]
                          if eig: 
                             self._eig_gamma2c = self.eigs_gamma2(self._gamma2c)[0]
+
+                    if 'delta_gamma' in properties:
+                       self._delta_gamma = self._gamma - self._rdm1_hf
 
                     if method2 == 'ccsd(t)':
                         ccsd_t = mf2.ccsd_t()
@@ -581,7 +594,7 @@ class EnginePyscf(Engine):
     @property
     def delta_gamma(self):
         if self._delta_gamma is None:
-            self.run(properties = ('energy','gamma2c'))
+            self.run(properties = ('energy','delta_gamma'))
         return self._delta_gamma
 
     @property
@@ -1293,8 +1306,11 @@ class EnginePyscf(Engine):
      
     def get_forces_fci(self,gamma=None,gamma2=None,ncas=None,nelecas=None,fci=True,**kwargs):
         atmlst = range(self.mf.mol.natm)
-#        de = self.grad_elec(gamma=gamma, gamma2=gamma2,
-        de = self.grad_elec_static(gamma=gamma, gamma2=gamma2,
+        if self.method.split('+')[1] == 'fci':
+           de = self.grad_elec_static(gamma=gamma, gamma2=gamma2,
+           ncas=ncas, nelecs=nelecas, atmlst = atmlst, fci=fci)
+        else:
+           de = self.grad_elec(gamma=gamma, gamma2=gamma2,
            ncas=ncas, nelecs=nelecas, atmlst = atmlst, fci=fci)
         forc_t=-1.0*(de+self.mf.nuc_grad_method().grad_nuc(self.mf.mol,atmlst=atmlst)) 
         #Adding gradient of the Nuclei-nuclei repulsion!

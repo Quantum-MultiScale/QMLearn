@@ -59,7 +59,7 @@ def db2qmmodel(filename, names = '*', mmodels = None, qmmol_options = None, puri
             'd_forces': LinearRegression(),
         }
         print(f'Guess mmodels: {mmodels}', flush = True)
-    model = QMModel(mmodels=mmodels, refqmmol = refqmmol, purify_gamma = purify_gamma, method=method)
+    model = QMModel(mmodels=mmodels, refqmmol = refqmmol, purify_gamma = purify_gamma, method=method, purify_method=purify_method)
     model.fit(X, y)
     #
     for k in mmodels :
@@ -79,7 +79,10 @@ def db2qmmodel(filename, names = '*', mmodels = None, qmmol_options = None, puri
             gammas_c = []
             for i, a in tenumerate(train_atoms):
                 gamma_d_ = model.predict(a, refatoms=a, model=model.mmodels['delta_gamma']).reshape(shape)
-                gamma, gamma_d = model.qmmol.engine.purify_d_gamma(gamma_d=gamma_d_,method=purify_method,pure=purify_gamma)
+                if model.purify_gamma :
+                   gamma, gamma_d = model.qmmol.engine.purify_d_gamma(gamma_d=gamma_d_,method=purify_method,pure=purify_gamma) 
+                else:
+                   gamma, gamma_d = model.qmmol.engine.purify_d_gamma(gamma_d=gamma_d_,pure=False)
                 gammas.append(gamma)
                 gammas_c.append(gamma_d)
             properties['gamma_pp'] = gammas
@@ -99,7 +102,7 @@ def db2qmmodel(filename, names = '*', mmodels = None, qmmol_options = None, puri
             if key not in properties :
                 print(f"!WARN : '{key}' not in the database", flush = True)
             if key[-2:] == '_c':
-                print(f'Delta learning $\gamma_c$ {key}')
+                print(rf'Delta learning ($\gamma$) - $\gamma_hf$ {key}')
                 y = gammas_c
                 model.fit(y, properties[key][index], method = k)
             else:

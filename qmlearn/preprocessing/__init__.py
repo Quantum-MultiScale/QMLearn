@@ -211,6 +211,10 @@ def append_properties(atoms, data = None, properties = None, refqmmol = None, re
             data[key].append(qmmol.engine.etotal)
         elif key == 'forces' :
             data[key].append(qmmol.engine.forces)
+        elif key == 'forces_c' :
+            hf_forces = -1.0 * qmmol.engine.mf.nuc_grad_method().kernel()
+            forces = qmmol.engine.forces - hf_forces
+            data[key].append(forces)
         elif key == 'dipole' :
             data[key].append(qmmol.calc_dipole(qmmol.engine.gamma))
         elif key == 'ke' :

@@ -33,7 +33,7 @@ class QMModel(object):
         Reference QMMol object
     """
     def __init__(self, mmodels = None, method='gamma', ncharge=None, nspin = 1, occs = None,
-            refqmmol = None, purify_gamma = True, purify_Gamma = True, **kwargs):
+            refqmmol = None, purify_gamma = True, purify_Gamma = True, purify_method=None, **kwargs):
         self.init_kwargs = locals()
         self.init_kwargs.pop('self', None)
         self.init_kwargs.pop('kwargs', None)
@@ -43,6 +43,7 @@ class QMModel(object):
         self.mmodels = mmodels or {}
         self.purify_gamma = purify_gamma
         self.purify_Gamma = purify_Gamma
+        self.purify_method = purify_method
         #
         if self.method not in self.mmodels :
             self.mmodels[self.method] = KernelRidge(alpha=0.1,kernel='linear')
@@ -122,6 +123,7 @@ class QMModel(object):
         if isinstance(y[0], np.ndarray):
             if y[0].ndim > 1 :
                 y = [item.ravel() for item in y]
+        
         #
         model.fit(X, y)
         return model

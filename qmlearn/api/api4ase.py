@@ -125,7 +125,6 @@ class QMLCalculator(Calculator):
             if self.qmmodel.purify_gamma :
               gamma, gamma_d = qmmol.engine.purify_d_gamma(gamma_d=gamma_d_)
             else:
-              print('False Delta Purification')
               gamma, gamma_d = qmmol.engine.purify_d_gamma(gamma_d=gamma_d_,pure=False)
         else:
             gamma = self.qmmodel.predict(qmmol).reshape(shape)
@@ -154,10 +153,11 @@ class QMLCalculator(Calculator):
             if m2 :
                 forces = self.qmmodel.predict(gamma_d,method=m2)
 #                forces /= 1000
-            forces = self.qmmodel.convert_back(forces, prop='forces_c')
+            forces = self.qmmodel.convert_back(forces, prop='forces')
             hf_forces = -1.0 * qmmol.engine.mf.nuc_grad_method().kernel()
             print('Running HF forces: \n', 'Predicted Forces C: \n' ,forces, '\n HF Forces: \n', hf_forces, '\n')
             forces += hf_forces
+            print('Total Forces: C+HF', forces)
             self.results['forces'] = forces * Ha/Bohr
 
         if 'energy' in properties and not 'energy_c' in properties:
@@ -381,17 +381,21 @@ class QMLCalculator(Calculator):
         """                                     
         print('RUNNING ENGINE', properties)
         qmmol.engine.run(properties = properties)
-
-        if 'delta_gamma' in properties or 'gamma2' in properties or 'gamma2c' in properties or 'gamma' in properties: 
-            gamma, gamma2, gamma2c, delta_gamma = qmmol.engine.all_gammas
-            if 'delta_gamma' in properties :
-                self.results['delta_gamma'] = delta_gamma
-            if 'gamma2' in properties :
-                self.results['gamma2'] = gamma2
-            if 'gamma2c' in properties :
-                self.results['gamma2c'] = gamma2c
-            if 'gamma' in properties:
-                self.results['gamma'] = gamma
+        if 'delta_gamma' in properties:
+            delta_gamma = qmmol.engine.delta_gamma
+            self.results['delta_gamma'] = delta_gamma
+        if 'gamma2' in properties:
+            gamma2 = qmmol.engine.gamma2
+            self.results['gamma2'] = gamma2
+        if 'gamma2c' in properties:
+            gamma2c = qmmol.engine.gamma2c
+            self.results['gamma2c'] = gamma2c
+        if 'gamma' in properties: 
+            gamma  = qmmol.engine.gamma
+            self.results['gamma'] = gamma
+        if 'gamma2cum' in properties:
+            gamma2cum = qmmol.engine.gamma2cum
+            self.results['gamma2cum'] = gamma2cum
 
         if 'energy' in properties:
             energy = qmmol.engine.etotal
