@@ -1,0 +1,19 @@
+{% extends "!breadcrumbs.html" %}
+
+<div role="navigation" aria-label="breadcrumbs navigation">
+
+  <ul class="wy-breadcrumbs">
+    {% block breadcrumbs_aside %}
+      <li class="wy-breadcrumbs-aside">
+        {% if hasdoc(pagename) %}
+			<a href={{ pathto('genindex') }}>Index</a>
+		{#			<a href={{ pathto('py-modindex') }}>Modules</a> #}
+          {% if show_source and has_source and sourcename %}
+			<a href="https://gitlab.com/pavanello-research-group/qmlearn/tree/master/Docs/{{ sourcename[:-4] }}">Source</a>
+          {% endif %}
+        {% endif %}
+      </li>
+    {% endblock %}
+  </ul>
+
+</div>
