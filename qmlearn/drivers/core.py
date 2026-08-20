@@ -482,6 +482,30 @@ class Engine(object):
 
         return gamma2_f_p, gamma2c_p
 
+    def purify_gamma2_n(self,gamma=None,gamma2=None):
+        trace = self.nelectron * (self.nelectron-1)
+        gamma2_f_p = self.update_gamma2(gamma2, gamma=gamma, trace = trace)
+        return gamma2_f_p
+
+
+    def purify_gamma2cum(self,gamma=None,gamma2cum=None,pure=True):
+
+        a = np.einsum('pq,rs->pqrs',gamma,gamma,optimize=True)
+        b = np.einsum('pq,rs->psrq',gamma,gamma,optimize=True)
+        wedge = .5*(2*a-b)
+        gamma2_r = gamma2cum + wedge
+
+        if pure:
+          trace = self.nelectron * (self.nelectron-1)
+          gamma2_f_p = self.update_gamma2(gamma2_r, gamma=gamma, trace = trace)
+        else:
+          gamma2_f_p = gamma2_r
+
+        gamma2cum_p = gamma2_f_p - .5*(2*a-b)
+
+        return gamma2_f_p, gamma2cum_p
+
+
     def purify_gamma2p(self,gamma=None,gamma2c=None,pure=True):
 
         if pure:
@@ -533,7 +557,7 @@ class Engine(object):
            mat_f = q
         return mat_f
 
-    def particle_df(self,gamma1,gamma2, type_rdm ='q'):
+    def particle_df(self,gamma1 = None,gamma2 = None, type_rdm ='q'):
         if type_rdm =='q':
           q = self.particle_hole_duality(gamma1 = gamma1,gamma2 = gamma2, type_rdm='q')
           results = q

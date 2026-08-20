@@ -393,8 +393,8 @@ class QMLCalculator(Calculator):
         if 'gamma' in properties: 
             gamma  = qmmol.engine.gamma
             self.results['gamma'] = gamma
-        if 'gamma2cum' in properties:
-            gamma2cum = qmmol.engine.gamma2cum
+        if 'gamma2cum' in properties: 
+            gamma2cum  = qmmol.engine.gamma2cum
             self.results['gamma2cum'] = gamma2cum
 
         if 'energy' in properties:

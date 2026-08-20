@@ -59,7 +59,7 @@ def db2qmmodel(filename, names = '*', mmodels = None, qmmol_options = None, puri
             'd_forces': LinearRegression(),
         }
         print(f'Guess mmodels: {mmodels}', flush = True)
-    model = QMModel(mmodels=mmodels, refqmmol = refqmmol, purify_gamma = purify_gamma, method=method, purify_method=purify_method)
+    model = QMModel(mmodels=mmodels, refqmmol = refqmmol, purify_gamma = purify_gamma, method=method)
     model.fit(X, y)
     #
     for k in mmodels :
