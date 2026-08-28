@@ -209,6 +209,8 @@ def append_properties(atoms, data = None, properties = None, refqmmol = None, re
                 data[key].append(qmmol.engine.gamma)
         elif key == 'energy' :
             data[key].append(qmmol.engine.etotal)
+        elif key == 'hamiltonian' :
+            data[key].append(qmmol.engine.hamiltonian)
         elif key == 'forces' :
             data[key].append(qmmol.engine.forces)
         elif key == 'forces_c' :

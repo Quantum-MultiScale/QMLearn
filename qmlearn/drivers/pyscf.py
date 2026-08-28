@@ -429,8 +429,13 @@ class EnginePyscf(Engine):
                         self._etotal = self._etotal + ccsd_t
                 self.mf2 = mf2
                 self._etotal_c = self._etotal - self.mf.e_tot
+
             else :
                 mf = self.mf
+                if self._gamma is not None:
+                    self._hamiltonian = self.mf.get_fock(self._gamma)
+                else:
+                    self._hamiltonian = self.mf.get_fock()
 
         if 'forces' in properties :
             if mom or smearing:
@@ -560,6 +565,12 @@ class EnginePyscf(Engine):
         if self._gamma is None:
             self.run(properties = ('energy'))
         return self._gamma
+
+    @property
+    def hamiltonian(self):
+        if self._hamiltonian is None:
+            self.run(properties = ('energy'))
+        return self._hamiltonian
 
     @property
     def gamma2(self):

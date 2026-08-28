@@ -84,7 +84,8 @@ def merge_db(filenames, names = '*', output = None):
             properties = data['properties']
             for k in properties :
                 properties[k] = [properties[k]]
-            properties['dipole'][0][0, 0] = 1000.0
+            if 'dipole' in properties:
+                properties['dipole'][0][0, 0] = 1000.0
         else :
             images.extend(data['atoms'])
             for k in properties :
