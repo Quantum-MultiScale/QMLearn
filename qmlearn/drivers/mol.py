@@ -128,6 +128,7 @@ class QMMol(object):
         smearing=self.init_kwargs.get('smearing', False)
         mom=self.init_kwargs.get('mom', False)
         ref_qmmol = self.init_kwargs.get('ref_qmmol',None)
+        set_df = self.init_kwargs.get('set_df', False)
         #-----------------------------------------------------------------------
         self.op_rotate = np.eye(3)
         self.op_translate = np.zeros(3)
@@ -183,6 +184,7 @@ class QMMol(object):
                 engine_options['smearing'] = smearing
                 engine_options['mom'] = mom
                 engine_options['ref_qmmol'] = ref_qmmol
+                engine_options['set_df'] = set_df
                 if isinstance(xc, (str, type(None))) :
                     engine_options['xc'] = xc
                 elif isinstance(xc, (list, tuple, set)):

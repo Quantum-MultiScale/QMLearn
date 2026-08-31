@@ -68,6 +68,8 @@ def get_args():
                         default=False, help='If "Yes" MOM will be apply taking as Reference: refqmmol') 
     parser.add_argument('--smearing', dest='smearing', type=bool, action='store',
                         default=False, help='If "Yes" will smear HF')
+    parser.add_argument('--set_df', dest='set_df', type=bool, action='store',
+                        default=False, help='If "Yes" gamma2 and gamma2cum will be density fitted')
     args = parser.parse_args()
     return args
 
@@ -99,6 +101,7 @@ def run(args):
     inv = args.inv
     mom = args.mom
     smearing =  args.smearing
+    set_df = args.set_df
     #-----------------------------------------------------------------------
     trajs = list(OrderedDict.fromkeys(trajs))
     print(f'Input files are : {trajs}')
@@ -130,6 +133,7 @@ def run(args):
             'masses' : masses,
             'smearing' : smearing,
             'mom' : mom,
+            'set_df' : set_df,
             }
 
     #print(qmmol_options)

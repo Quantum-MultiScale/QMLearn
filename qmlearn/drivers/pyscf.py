@@ -12,6 +12,8 @@ from pyscf.scf import addons
 from functools import reduce
 from pyscf.scf import cphf
 from pyscf.grad.mp2 import _shell_prange
+from qmlearn.utils.utils import density_fitting_g2
+from pyscf import df
 
 from qmlearn.drivers.core import Engine, MOMOrbitalTracker
 
@@ -91,6 +93,7 @@ class EnginePyscf(Engine):
         smearing = self.options.get('smearing',False)
         mom = self.options.get('mom',False)
         ref_qmmol = self.options.get('ref_qmmol',None)
+        set_df = self.options.get('set_df', False)
         #ao_repr = self.options.get('ao_repr', True)
         #
         if isinstance(self.method, str):
@@ -110,6 +113,7 @@ class EnginePyscf(Engine):
         self.mol = self.mf.mol
         self.h1e = self.mf.get_hcore()
         self.h2e = self.mf.mol.intor('int2e')
+        self.set_df = set_df
 
     def init_mol(self, mol, basis, charge = 0,symmetry=False):
         r""" Function to create PySCF atom object
@@ -430,12 +434,20 @@ class EnginePyscf(Engine):
                 self.mf2 = mf2
                 self._etotal_c = self._etotal - self.mf.e_tot
 
-            else :
-                mf = self.mf
                 if self._gamma is not None:
                     self._hamiltonian = self.mf.get_fock(self._gamma)
                 else:
                     self._hamiltonian = self.mf.get_fock()
+
+                if self._gamma2c is not None and self.set_df:
+                    print('Gamma2 and Delta DF: ', self.set_df)
+                    auxmol = df.addons.make_auxmol(self.mf.mol, auxbasis='cc-pvdz-jkfit')
+                    gamma2_cum_df = density_fitting_g2(self.mf.mol, self._gamma2c, auxmol)
+                    gamma2_df = density_fitting_g2(self.mf.mol, self._gamma2, auxmol)
+                    self._gamma2 = gamma2_df
+                    self._gamma2c = gamma2_cum_df
+            else :
+                mf = self.mf
 
         if 'forces' in properties :
             if mom or smearing:
