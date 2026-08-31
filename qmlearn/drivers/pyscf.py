@@ -446,6 +446,8 @@ class EnginePyscf(Engine):
                     gamma2_df = density_fitting_g2(self.mf.mol, self._gamma2, auxmol)
                     self._gamma2 = gamma2_df
                     self._gamma2c = gamma2_cum_df
+                    int2c2e = auxmol.intor('int2c2e') 
+                    self._energycum_df = 0.5 * np.einsum('AB,AB->', gamma2_cum_df, int2c2e, optimize=True)
             else :
                 mf = self.mf
 
@@ -601,6 +603,12 @@ class EnginePyscf(Engine):
         if self._gamma2c is None:
             self.run(properties = ('energy','gamma2cum'))
         return self._gamma2c
+
+    @property
+    def energycum_df(self):
+        if self._energycum_df is None:
+            self.run(properties = ('energy','gamma2cum'))
+        return self._energycum_df
 
     @property
     def eig_gamma2c(self):

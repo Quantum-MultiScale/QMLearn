@@ -67,6 +67,7 @@ class Engine(object):
         self._gamma_11 = None
         self._occ_dg = None
         self._hamiltonian = None
+        self._energycum_df = None
         #
         self._kop = None
         self._ovlp = None
