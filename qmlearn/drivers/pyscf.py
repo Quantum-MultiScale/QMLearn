@@ -1050,14 +1050,25 @@ class EnginePyscf(Engine):
         gamma2_4d = np.transpose(gamma2.reshape((r,r,r,r)),[0,2,1,3])
         return gamma2_4d
 
-    def grad_elec(self, gamma=None, gamma2=None, ncas=None, nelecs=None, 
+    def grad_elec(self, gamma=None, gamma2=None, ncas=None, nelecs=None,
               atmlst=None, fci=True, **kwargs):
+        r"""
+        .. math::
+            \frac{\partial E_{\text{tot}}}{\partial \chi_A} =
+                \sum_{\mu\nu} \frac{\delta h_{\mu \nu}}{\delta \chi_A} \gamma_{\mu \nu}^{1,back}
+              + \frac{1}{2} \sum_{\mu \nu \tau \sigma } \frac{\delta g_{\mu \nu \tau \sigma}}{\delta \chi_A} \Gamma^{2,back}_{\mu \tau \sigma \nu}
+              + 2 \sum_{r>s} Z^{'}_{rs} B_{rs}^{\chi_A}
+              - \sum_{\mu \nu} \hat{F}_{\mu \nu}^{back} \frac{\delta \langle \mu | \nu \rangle}{\delta \chi_A}
+              + \frac{\delta V_{NN}}{\delta \chi_A}
+        """
 
         mc_grad = self.mf.nuc_grad_method()
         mo_coeff = self.mf.mo_coeff
         mol = self.mf.mol
-        
-        if fci:    
+
+        if fci or ncas is None or nelecs is None:
+            # No (or incomplete) active-space info given -> treat the whole
+            # basis as active (ncore=0), same as the fci=True convention.
             ncas = len(self.mf.mo_coeff)
             neleca, nelecb = mol.nelec
             nelecas = (neleca, nelecb)
@@ -1215,11 +1226,20 @@ class EnginePyscf(Engine):
 
     def grad_elec_static(self, gamma=None, gamma2=None, ncas=None, nelecs=None,
                      atmlst=None, fci=True, **kwargs):
+        r"""
+        .. math::
+            \frac{\partial E_{\text{tot}}}{\partial \chi_A} =
+                \sum_{\mu\nu} \frac{\delta h_{\mu \nu}}{\delta \chi_A} \gamma_{\mu \nu}^{back}
+              + \frac{1}{2} \sum_{\mu \nu \tau \sigma } \frac{\delta g_{\mu \nu \tau \sigma}}{\delta \chi_A} \Gamma^{back}_{\mu \tau \sigma \nu}
+              - \sum_{\mu \nu} \hat{F}_{\mu \nu}^{back} \frac{\delta \langle \mu | \nu \rangle}{\delta \chi_A}
+        """
         mc_grad = self.mf.nuc_grad_method()
         mo_coeff = self.mf.mo_coeff
         mol = self.mf.mol
-        
-        if fci:    
+
+        if fci or ncas is None or nelecs is None:
+            # No (or incomplete) active-space info given -> treat the whole
+            # basis as active (ncore=0), same as the fci=True convention.
             ncas = len(self.mf.mo_coeff)
             neleca, nelecb = mol.nelec
             nelecas = (neleca, nelecb)
@@ -1332,18 +1352,138 @@ class EnginePyscf(Engine):
     
             de[k] -= np.einsum('xij,ij->x', s1[:,p0:p1], im1[p0:p1],optimize=True)
             de[k] -= np.einsum('xij,ji->x', s1[:,p0:p1], im1[:,p0:p1],optimize=True)
-     
+
         return de
-     
-    def get_forces_fci(self,gamma=None,gamma2=None,ncas=None,nelecas=None,fci=True,**kwargs):
+
+    def grad_elec_full_static(self, gamma=None, gamma2=None, atmlst=None, pulay=True, **kwargs):
+        r"""
+        .. math::
+            \frac{\partial E_{\text{tot}}}{\partial \chi_A} =
+                \sum_{\mu\nu} \frac{\delta h_{\mu \nu}}{\delta \chi_A} \gamma_{\mu \nu}
+              + \frac{1}{2} \sum_{\mu \nu \tau \sigma } \frac{\delta g_{\mu \nu \tau \sigma}}{\delta \chi_A} \Gamma_{\mu \tau \sigma \nu}
+              - \sum_{\mu \nu} \hat{F}_{\mu \nu} \frac{\delta \langle \mu | \nu \rangle}{\delta \chi_A}
+        """
+        mf_grad = self.mf.nuc_grad_method()
+        mol = self.mf.mol
+        nao = gamma.shape[0]
+        nao_pair = nao * (nao+1) // 2
+
+        dm1 = gamma
+
+        if pulay:
+            # Generalized Fock/Lagrangian matrix, built directly in AO basis.
+            # Because AOs are non-orthogonal, converting the usual MO-basis
+            # Lagrangian h1_{pi} gamma1_{iq} + h2_{pijk} gamma_{iqkj} back into AO
+            # indices picks up an overall S^{-1} (the MOs satisfy C.C^T = S^{-1}):
+            # Imat = S^{-1} [ h1.D1 + (pr|st) Gamma_{qrst} ]
+            h1 = self.mf.get_hcore()
+            s = self.mf.get_ovlp()
+            sinv = np.linalg.inv(s)
+            eri_ao = mol.intor('int2e', aosym='s1').reshape(nao, nao, nao, nao)
+            im1 = h1.dot(dm1)
+            im1 += lib.einsum('ijpk,jikq->pq', eri_ao, gamma2, optimize=True)
+            im1 = sinv.dot(im1)
+            eri_ao = None
+
+        hcore_deriv = mf_grad.hcore_generator(mol)
+        s1 = mf_grad.get_ovlp(mol)
+
+        diag_idx = np.arange(nao)
+        diag_idx = diag_idx * (diag_idx+1) // 2 + diag_idx
+        dm2_cc = gamma2 + gamma2.transpose(0,1,3,2)
+        # gamma2 is already AO-indexed on all four legs, so no ao2mo
+        # half-transform is needed here (unlike grad_elec_static).
+        dm2buf = lib.pack_tril(dm2_cc.reshape(nao*nao, nao, nao))
+        dm2buf[:,diag_idx] *= .5
+        dm2buf = dm2buf.reshape(nao, nao, nao_pair)
+        dm2_cc = None
+
+        if atmlst is None:
+            atmlst = range(mol.natm)
+        aoslices = mol.aoslice_by_atom()
+        de = np.zeros((len(atmlst),3))
+
+        for k, ia in enumerate(atmlst):
+            shl0, shl1, p0, p1 = aoslices[ia]
+            h1ao = hcore_deriv(ia)
+            de[k] += np.einsum('xij,ij->x', h1ao, dm1, optimize=True)
+
+            q1 = 0
+            for b0, b1, nf in _shell_prange(mol, 0, mol.nbas, nao):
+                q0, q1 = q1, q1 + nf
+                # dm2buf's first two legs are already AO-indexed, so the
+                # active-space slice is a plain slice (no mo_cas transform).
+                dm2_ao = dm2buf[p0:p1, q0:q1]
+                shls_slice = (shl0,shl1,b0,b1,0,mol.nbas,0,mol.nbas)
+                eri1 = mol.intor('int2e_ip1', comp=3, aosym='s2kl',
+                                 shls_slice=shls_slice).reshape(3,p1-p0,nf,nao_pair)
+                de[k] -= np.einsum('xijw,ijw->x', eri1, dm2_ao, optimize=True) * 2
+                eri1 = None
+
+            if pulay:
+                de[k] -= np.einsum('xij,ij->x', s1[:,p0:p1], im1[p0:p1],optimize=True)
+                de[k] -= np.einsum('xij,ji->x', s1[:,p0:p1], im1[:,p0:p1],optimize=True)
+
+        return de
+
+    def get_forces_fci(self,gamma=None,gamma2=None,ncas=None,nelecas=None,fci=True,
+                        full_static=False,pulay=True,response_de=None,**kwargs):
+        r"""
+        grad_elec_full_static:
+        .. math::
+            \frac{\partial E_{\text{tot}}}{\partial \chi_A} =
+                \sum_{\mu\nu} \frac{\delta h_{\mu \nu}}{\delta \chi_A} \gamma_{\mu \nu}
+              + \frac{1}{2} \sum_{\mu \nu \tau \sigma } \frac{\delta g_{\mu \nu \tau \sigma}}{\delta \chi_A} \Gamma_{\mu \tau \sigma \nu}
+              - \sum_{\mu \nu} \hat{F}_{\mu \nu} \frac{\delta \langle \mu | \nu \rangle}{\delta \chi_A}
+        self.get_forces_fci(gamma=gamma, gamma2=gamma2, fci=True, full_static=True)
+
+        grad_elec_static:
+        .. math::
+            \frac{\partial E_{\text{tot}}}{\partial \chi_A} =
+                \sum_{\mu\nu} \frac{\delta h_{\mu \nu}}{\delta \chi_A} \gamma_{\mu \nu}^{back}
+              + \frac{1}{2} \sum_{\mu \nu \tau \sigma } \frac{\delta g_{\mu \nu \tau \sigma}}{\delta \chi_A} \Gamma^{back}_{\mu \tau \sigma \nu}
+              - \sum_{\mu \nu} \hat{F}_{\mu \nu}^{back} \frac{\delta \langle \mu | \nu \rangle}{\delta \chi_A}
+        self.get_forces_fci(gamma=gamma, gamma2=gamma2, fci=True)
+
+        grad_elec:
+        .. math::
+            \frac{\partial E_{\text{tot}}}{\partial \chi_A} =
+                \sum_{\mu\nu} \frac{\delta h_{\mu \nu}}{\delta \chi_A} \gamma_{\mu \nu}^{1,back}
+              + \frac{1}{2} \sum_{\mu \nu \tau \sigma } \frac{\delta g_{\mu \nu \tau \sigma}}{\delta \chi_A} \Gamma^{2,back}_{\mu \tau \sigma \nu}
+              + 2 \sum_{r>s} Z^{'}_{rs} B_{rs}^{\chi_A}
+              - \sum_{\mu \nu} \hat{F}_{\mu \nu}^{back} \frac{\delta \langle \mu | \nu \rangle}{\delta \chi_A}
+              + \frac{\delta V_{NN}}{\delta \chi_A}
+        self.get_forces_fci(gamma=gamma, gamma2=gamma2, ncas=ncas, nelecas=nelecas, fci=False)
+
+        pulay : bool
+            Only used when fci=True and full_static=True: passed through to
+            grad_elec_full_static's own pulay kwarg. False gives the
+            Hellmann-Feynman-only ("D") term; True (default) gives the
+            naive-Pulay ("C"/"E") term.
+        response_de : ndarray (len(atmlst), 3), optional
+            An explicit RDM-response (Term 2) electronic-gradient contribution
+            to add to ``de`` -- once, before the nuclear-repulsion term and
+            sign flip below -- e.g. from
+            qmlearn.model.response.grad_rdm_response(_fd)(...). Only makes
+            sense together with full_static=True, pulay=False (Term 1 alone):
+            -W.S^(1) (pulay=True) and this response term are alternative,
+            non-additive accounts of the same physics (see
+            grad_elec_full_static), so combining them double-counts it.
+        """
         atmlst = range(self.mf.mol.natm)
-        if self.method.split('+')[1] == 'fci':
-           de = self.grad_elec_static(gamma=gamma, gamma2=gamma2,
-           ncas=ncas, nelecs=nelecas, atmlst = atmlst, fci=fci)
+        if fci:
+           if full_static:
+              de = self.grad_elec_full_static(gamma=gamma, gamma2=gamma2,
+              atmlst = atmlst, pulay=pulay)
+           else:
+              de = self.grad_elec_static(gamma=gamma, gamma2=gamma2,
+              ncas=ncas, nelecs=nelecas, atmlst = atmlst, fci=fci)
         else:
            de = self.grad_elec(gamma=gamma, gamma2=gamma2,
            ncas=ncas, nelecs=nelecas, atmlst = atmlst, fci=fci)
-        forc_t=-1.0*(de+self.mf.nuc_grad_method().grad_nuc(self.mf.mol,atmlst=atmlst)) 
+        if response_de is not None:
+           de = de + response_de
+        forc_t=-1.0*(de+self.mf.nuc_grad_method().grad_nuc(self.mf.mol,atmlst=atmlst))
         #Adding gradient of the Nuclei-nuclei repulsion!
         return forc_t
 

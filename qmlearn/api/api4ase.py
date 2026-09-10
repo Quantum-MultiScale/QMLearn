@@ -2,6 +2,7 @@ import numpy as np
 from ase.calculators.calculator import Calculator, all_changes
 from ase.units import Ha, Bohr
 from sklearn.preprocessing import StandardScaler
+from qmlearn.model.response import grad_rdm_response_fd, grad_rdm_response_cumulant
 
 class QMLCalculator(Calculator):
     r""" Mean QML calculator
@@ -31,7 +32,28 @@ class QMLCalculator(Calculator):
 
     def __init__(self, qmmodel = None, qmmodel2=None, second_learn = {}, method = 'gamma',
             label='QMLearn', atoms=None, directory='.', refqmmol = None, properties = ('energy', ),
-            **kwargs):
+            force_method = 'cphf', **kwargs):
+        r"""
+        force_method : str
+            Only used by :meth:`calc_with_gamma2cum2`. Options
+
+            | 'cphf' (A) : full CPHF/Z-vector response (``get_forces_fci(fci=False)``
+              for 'casci', or the ``fci=True`` default for 'fci'/'ccsd') --
+              the previous, default behaviour.
+            | 'static' (B) : ``get_forces_fci(fci=True)``, i.e. ``grad_elec_static``.
+            | 'naive_pulay' (C/E) : ``get_forces_fci(fci=True, full_static=True)``,
+              i.e. ``grad_elec_full_static`` with its default ``pulay=True``.
+            | 'no_response' (D) : Term 1 only, ``grad_elec_full_static(pulay=False)``
+              -- Hellmann-Feynman + the two-electron term, no correction at all.
+            | 'ml_response' (F) : Term 1 (``pulay=False``) + Term 2, the RDM-response
+              term ``h.(dgamma/dX_A) + (2e).(dGamma/dX_A)`` computed by
+              finite-differencing the predict+purify+cumulant-expansion
+              pipeline itself (:func:`qmlearn.model.response.grad_rdm_response_fd`).
+
+            All five route through :meth:`EnginePyscf.get_forces_fci`'s
+            ``pulay``/``response_de`` kwargs, so the nuclear-repulsion term is
+            added exactly once, the same way, for every option.
+        """
         Calculator.__init__(self, label = label, atoms = atoms, directory = directory, **kwargs)
         self.qmmodel = qmmodel
         self.qmmodel2 = qmmodel2
@@ -39,6 +61,7 @@ class QMLCalculator(Calculator):
         self.method = method
         self._refqmmol = refqmmol
         self._properties = properties
+        self.force_method = force_method
 
     @property
     def refqmmol(self):
@@ -102,6 +125,9 @@ class QMLCalculator(Calculator):
             elif self.method == 'gamma2cum':
                 qmmol =  self.refqmmol.duplicate(atoms.copy())
                 self.calc_with_gamma2cum(qmmol, properties=properties)
+            elif self.method == 'gamma2cum2':
+                qmmol =  self.refqmmol.duplicate(atoms.copy())
+                self.calc_with_gamma2cum2(qmmol, properties=properties)
             else :
                 raise AttributeError(f"Sorry, not support '{self.method}' now.")
 
@@ -281,6 +307,7 @@ class QMLCalculator(Calculator):
             | Cumulant 2-RDM: 'gamma2cum'
 
         """
+        qmmol.engine.mf.run()  # need mo_coeff/mo_energy for get_forces_fci below
         shape = self.qmmodel.refqmmol.vext.shape
         shape2 = (shape[0],) * 4
         gamma_d_ = self.qmmodel.predict(qmmol,
@@ -326,6 +353,122 @@ class QMLCalculator(Calculator):
                     forces = qmmol.engine.get_forces_fci(gamma=gamma_fp,gamma2=gamma2,
                                                     ncas=ncas,nelecas=nelecas,fci=False)
                 forces = self.qmmodel.convert_back(forces, prop='forces')
+            self.results['forces'] = forces* Ha/Bohr
+            print('Forces: ',forces* Ha/Bohr)
+
+        if 'energy' in properties:
+            energy = qmmol.engine.calc_etotal2(gamma=gamma_fp, gamma2cum=gamma2cum,
+                                       ao_repr=True, cum=True)
+            self.results['energy'] = energy * Ha
+
+
+    def calc_with_gamma2cum2(self,qmmol, properties = ('energy')):
+        r""" Function to calculate the desire properties using QMLearn learning process with gamma2 cum (Second type).
+
+        Parameters
+        ----------
+        properties : list:str
+            Options
+
+            | Energy : 'energy'
+            | Forces : 'forces'
+            | 1-RDM : 'gamma'
+            | 2-RDM : 'gamma2'
+            | \delta_1RDM : 'delta_gamma'
+            | Cumulant 2-RDM: 'gamma2cum'
+
+        """
+        if self.force_method in ('cphf', 'static'):
+            # grad_elec/grad_elec_static (used by these two) need converged
+            # mo_coeff/mo_energy. The other force_method options all route
+            # through grad_elec_full_static, which only needs mf.get_hcore()/
+            # get_ovlp() and AO integrals -- no SCF has to be run for those.
+            qmmol.engine.mf.run()
+        shape = self.qmmodel.refqmmol.vext.shape
+        shape2 = (shape[0],) * 4
+
+        def predict_gamma_gamma2(x):
+            r""" x = qmmol (the real geometry, for the actual prediction below)
+            or a raw AO vext array (only used by grad_rdm_response_fd to
+            finite-difference the response term) -> (gamma, Gamma, gamma2cum).
+            self.qmmodel.predict/self.qmmodel2.predict already handle either
+            input via QMModel.translate_input -- exactly like
+            calc_with_gamma2cum's gamma_d_ = self.qmmodel.predict(qmmol, ...). """
+            gamma_ = self.qmmodel.predict(x,
+                           model=self.qmmodel.mmodels['gamma']).reshape(shape)
+            if self.qmmodel.purify_gamma :
+                gamma_fp_ = qmmol.engine.purify_gamma(gamma_, method='smearing')
+            else:
+                gamma_fp_ = gamma_
+            gamma2cum_ = self.qmmodel2.predict(x,
+                                     model=self.qmmodel2.mmodels['gamma2cum']).reshape(shape2)
+            gamma2_, _ = qmmol.engine.purify_gamma2cum(gamma=gamma_fp_, gamma2cum=gamma2cum_, pure=False)
+            return gamma_fp_, gamma2_, gamma2cum_
+
+        gamma_fp, gamma2, gamma2cum = predict_gamma_gamma2(qmmol)
+
+        if 'gamma' in properties:
+            self.results['gamma'] = gamma_fp
+        if 'gamma2cum' in properties:
+            self.results['gamma2cum'] = gamma2cum
+        if 'gamma2' in properties:
+            self.results['gamma2'] = gamma2
+
+        if 'forces' in properties:
+
+            m2 = self.second_learn.get('forces', None)
+            if m2 :
+                raise AttributeError("gamma2cum2 does not support second_learn forces / d_forces.")
+
+            # All five options below go through get_forces_fci, which adds
+            # grad_nuc and flips the sign exactly once, the same way, for
+            # every method (see EnginePyscf.get_forces_fci's pulay/response_de
+            # kwargs) -- avoids hand-rolling that arithmetic per branch.
+            if self.force_method == 'static':
+                # B: grad_elec_static
+                forces = qmmol.engine.get_forces_fci(gamma=gamma_fp, gamma2=gamma2, fci=True)
+            elif self.force_method == 'no_response':
+                # D: Term 1 only (Hellmann-Feynman), grad_elec_full_static(pulay=False)
+                forces = qmmol.engine.get_forces_fci(gamma=gamma_fp, gamma2=gamma2,
+                                                fci=True, full_static=True, pulay=False)
+            elif self.force_method in ('naive_pulay', 'full_static'):
+                # C/E: Term 1 + naive Pulay, grad_elec_full_static(pulay=True)
+                forces = qmmol.engine.get_forces_fci(gamma=gamma_fp, gamma2=gamma2,
+                                                fci=True, full_static=True, pulay=True)
+            elif self.force_method == 'ml_response':
+                # F: Term 1 + the RDM-response term. Analytic (via the
+                # gamma+cumulant wedge-product chain rule) when gamma isn't
+                # purified; falls back to finite difference when it is,
+                # since purify_gamma's Fermi-level solve has no simple
+                # closed-form Jacobian.
+                if self.qmmodel.purify_gamma:
+                    term2 = grad_rdm_response_fd(lambda v: predict_gamma_gamma2(v)[:2], qmmol)
+                else:
+                    term2 = grad_rdm_response_cumulant(self.qmmodel, self.qmmodel2, gamma_fp, qmmol)
+                forces = qmmol.engine.get_forces_fci(gamma=gamma_fp, gamma2=gamma2, fci=True,
+                                                full_static=True, pulay=False, response_de=term2)
+            elif self.force_method == 'cphf':
+                # A: full CPHF/Z-vector, grad_elec. 'fci' is already exactly
+                # orbital-invariant (fci=True/grad_elec_static suffices), but
+                # 'ccsd' is not -- it genuinely needs the Z-vector solve
+                # (fci=False; ncas/nelecas default to the full space when not
+                # given, since CCSD's RDMs already span the whole basis).
+                if qmmol.method == 'fci':
+                    forces = qmmol.engine.get_forces_fci(gamma=gamma_fp,gamma2=gamma2)
+                elif qmmol.method == 'ccsd':
+                    forces = qmmol.engine.get_forces_fci(gamma=gamma_fp,gamma2=gamma2,fci=False)
+                elif qmmol.method == 'casci':
+                    ncas = self.qmmodel.refqmmol.engine_options['ncas']
+                    nelecas = self.qmmodel.refqmmol.engine_options['nelecas']
+                    forces = qmmol.engine.get_forces_fci(gamma=gamma_fp,gamma2=gamma2,
+                                                    ncas=ncas,nelecas=nelecas,fci=False)
+                else :
+                    raise AttributeError(f"Sorry, not support the '{qmmol.method}' method now")
+            else:
+                raise AttributeError(f"Sorry, not support force_method='{self.force_method}' now"
+                                      f" (options: 'cphf', 'static', 'naive_pulay', 'no_response', "
+                                      f"'ml_response').")
+            forces = self.qmmodel.convert_back(forces, prop='forces')
             self.results['forces'] = forces* Ha/Bohr
             print('Forces: ',forces* Ha/Bohr)
 
