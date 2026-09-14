@@ -16,6 +16,7 @@ from qmlearn.utils.utils import density_fitting_g2
 from pyscf import df
 
 from qmlearn.drivers.core import Engine, MOMOrbitalTracker
+from qmlearn.model.response import project_rigid_body
 
 methods_pyscf = {
         'dft' : dft.RKS,
@@ -1485,6 +1486,8 @@ class EnginePyscf(Engine):
            de = de + response_de
         forc_t=-1.0*(de+self.mf.nuc_grad_method().grad_nuc(self.mf.mol,atmlst=atmlst))
         #Adding gradient of the Nuclei-nuclei repulsion!
+        if response_de is not None:
+           forc_t = project_rigid_body(forc_t, self.mf.mol.atom_coords())
         return forc_t
 
 

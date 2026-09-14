@@ -195,6 +195,63 @@ def grad_rdm_response_fd(func, qmmol, atmlst=None, step=1e-4):
     return de
 
 
+def project_rigid_body(forces, positions):
+    r""" Remove net force and net torque from a Cartesian gradient.
+
+    QMLearn predicts in the Kabsch-aligned frame, so the energy ASE uses is
+    :math:`E(X)=E_{\mathrm{aligned}}(\mathrm{Kabsch}(X))`. Differentiating
+    the KRR model with respect to the aligned Cartesians (Term 2) does not
+    include :math:`J_{\mathrm{Kabsch}}^{T}`. At an already-aligned geometry
+    that Jacobian is the projector onto internal (non-rigid-body) motions,
+    i.e. this function.
+
+    Translations and rotations about the unweighted centre of geometry are
+    orthonormalized and subtracted. A vanishing rotation (linear molecule)
+    is dropped. The inner product is the unweighted Frobenius product on
+    Cartesian components, which is the one that matches :math:`dE/dX`.
+
+    Parameters
+    ----------
+    forces : ndarray, shape (natm, 3)
+    positions : ndarray, shape (natm, 3)
+        Coordinates in the same frame as ``forces`` (Bohr or Angstrom).
+
+    Returns
+    -------
+    forces : ndarray, shape (natm, 3)
+    """
+    forces = np.asarray(forces, dtype=float).reshape(-1, 3).copy()
+    positions = np.asarray(positions, dtype=float).reshape(-1, 3)
+    if forces.shape != positions.shape:
+        raise ValueError(
+            f"forces {forces.shape} and positions {positions.shape} must match"
+        )
+    n = len(positions)
+    r = positions - positions.mean(axis=0)
+    modes = []
+    for j in range(3):
+        t = np.zeros((n, 3))
+        t[:, j] = 1.0
+        modes.append(t.ravel())
+    for j in range(3):
+        axis = np.zeros(3)
+        axis[j] = 1.0
+        modes.append(np.cross(axis, r).ravel())
+    B = []
+    for v in modes:
+        for b in B:
+            v = v - b * np.dot(b, v)
+        nrm = np.linalg.norm(v)
+        if nrm > 1e-12:
+            B.append(v / nrm)
+    if not B:
+        return forces
+    B = np.asarray(B)
+    f = forces.ravel()
+    f = f - B.T @ (B @ f)
+    return f.reshape(-1, 3)
+
+
 def wedge(A, B):
     r""" :math:`(A \wedge B)_{pqrs} = A_{pq} B_{rs} - \tfrac12 A_{ps} B_{rq}`,
     the same bilinear form used throughout this project's cumulant expansion
