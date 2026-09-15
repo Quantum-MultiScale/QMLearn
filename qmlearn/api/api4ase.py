@@ -2,7 +2,7 @@ import numpy as np
 from ase.calculators.calculator import Calculator, all_changes
 from ase.units import Ha, Bohr
 from sklearn.preprocessing import StandardScaler
-from qmlearn.model.response import grad_rdm_response_fd, grad_rdm_response_cumulant
+from qmlearn.model.response import grad_rdm_response_fd, grad_rdm_response_cumulant, kabsch_lab_frame_force
 
 class QMLCalculator(Calculator):
     r""" Mean QML calculator
@@ -424,6 +424,14 @@ class QMLCalculator(Calculator):
             # grad_nuc and flips the sign exactly once, the same way, for
             # every method (see EnginePyscf.get_forces_fci's pulay/response_de
             # kwargs) -- avoids hand-rolling that arithmetic per branch.
+            #
+            # rotate_forces: whether the final QMModel.convert_back should
+            # still apply its own (current-rotation-only) rotate-to-lab-frame
+            # step. Only 'ml_response' skips it, having already gone through
+            # the full Kabsch-Jacobian contraction (kabsch_lab_frame_force)
+            # instead -- see the docstring there for why that distinction
+            # matters (dR/dX vs. just the current rotation matrix).
+            rotate_forces = True
             if self.force_method == 'static':
                 # B: grad_elec_static
                 forces = qmmol.engine.get_forces_fci(gamma=gamma_fp, gamma2=gamma2, fci=True)
@@ -445,8 +453,23 @@ class QMLCalculator(Calculator):
                     term2 = grad_rdm_response_fd(lambda v: predict_gamma_gamma2(v)[:2], qmmol)
                 else:
                     term2 = grad_rdm_response_cumulant(self.qmmodel, self.qmmodel2, gamma_fp, qmmol)
+                # apply_rigid_body_projection=False: project_rigid_body and
+                # the full Kabsch Jacobian (below) both correct for the same
+                # missing dR/dX term, and turn out to be mathematically
+                # redundant when composed -- project_rigid_body zeroes
+                # exactly the (net-torque) component of the aligned-frame
+                # force that the extra Jacobian term would otherwise act on.
+                # Skipping it here and applying the full Jacobian to the raw
+                # force directly is the more complete (and empirically
+                # better) of the two, not a double-correction.
                 forces = qmmol.engine.get_forces_fci(gamma=gamma_fp, gamma2=gamma2, fci=True,
-                                                full_static=True, pulay=False, response_de=term2)
+                                                full_static=True, pulay=False, response_de=term2,
+                                                apply_rigid_body_projection=False)
+                # Full Kabsch-Jacobian rotation-back (dR/dX, not just the
+                # current rotation matrix) -- supersedes convert_back's
+                # rotation for this method only.
+                forces = kabsch_lab_frame_force(qmmol, forces)
+                rotate_forces = False
             elif self.force_method == 'cphf':
                 # A: full CPHF/Z-vector, grad_elec. 'fci' is already exactly
                 # orbital-invariant (fci=True/grad_elec_static suffices), but
@@ -468,7 +491,7 @@ class QMLCalculator(Calculator):
                 raise AttributeError(f"Sorry, not support force_method='{self.force_method}' now"
                                       f" (options: 'cphf', 'static', 'naive_pulay', 'no_response', "
                                       f"'ml_response').")
-            forces = self.qmmodel.convert_back(forces, prop='forces')
+            forces = self.qmmodel.convert_back(forces, prop='forces', rotate=rotate_forces)
             self.results['forces'] = forces* Ha/Bohr
             print('Forces: ',forces* Ha/Bohr)
 

@@ -1428,7 +1428,8 @@ class EnginePyscf(Engine):
         return de
 
     def get_forces_fci(self,gamma=None,gamma2=None,ncas=None,nelecas=None,fci=True,
-                        full_static=False,pulay=True,response_de=None,**kwargs):
+                        full_static=False,pulay=True,response_de=None,
+                        apply_rigid_body_projection=True,**kwargs):
         r"""
         grad_elec_full_static:
         .. math::
@@ -1486,7 +1487,7 @@ class EnginePyscf(Engine):
            de = de + response_de
         forc_t=-1.0*(de+self.mf.nuc_grad_method().grad_nuc(self.mf.mol,atmlst=atmlst))
         #Adding gradient of the Nuclei-nuclei repulsion!
-        if response_de is not None:
+        if response_de is not None and apply_rigid_body_projection:
            forc_t = project_rigid_body(forc_t, self.mf.mol.atom_coords())
         return forc_t
 

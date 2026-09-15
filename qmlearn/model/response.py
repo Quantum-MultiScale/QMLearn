@@ -195,6 +195,138 @@ def grad_rdm_response_fd(func, qmmol, atmlst=None, step=1e-4):
     return de
 
 
+def _kabsch_rotation_and_stretch(P, Q):
+    r""" Kabsch-optimal proper rotation :math:`U` (minimizing
+    :math:`\|PU-Q\|_F^2` over orthogonal :math:`U`, with :math:`\det U=+1`)
+    for already-centered point sets ``P``, ``Q`` -- same convention as
+    ``rmsd.calculate_rmsd.kabsch`` (``qmlearn.drivers.core``'s alignment
+    backend) -- plus the symmetric polar factor :math:`S=U^TC`,
+    :math:`C=P^TQ`, needed for the analytic derivative below.
+    """
+    C = P.T @ Q                                            # C = P^T Q
+    V, _, W = np.linalg.svd(C)                              # SVD: C = V Sigma W
+    d = 1.0 if (np.linalg.det(V) * np.linalg.det(W)) >= 0 else -1.0  # d = sign(det(V) det(W))
+    U = V @ np.diag([1.0, 1.0, d]) @ W                      # U = V diag(1,1,d) W  (Kabsch rotation)
+    S = U.T @ C                                             # S = U^T C  (C = U S, polar decomposition)
+    S = 0.5 * (S + S.T)  # S := (S + S^T)/2 -- symmetric by construction; enforce exactly against roundoff
+    return U, S
+
+
+def kabsch_lab_frame_force(qmmol, force_aligned, step=1e-4):
+    r""" Convert an aligned-frame force into the lab-frame force by
+    contracting it with the analytic Kabsch alignment Jacobian
+    :math:`\partial R/\partial X`.
+
+    QMLearn evaluates the energy after a Kabsch alignment onto a fixed
+    reference, :math:`E(X)=E_{\mathrm{al}}(R(X))`, so the physical force
+    needs the extra chain-rule factor
+    :math:`F^{\mathrm{lab}}_{a\alpha}=\sum_{b,i}F^{\mathrm{al}}_{bi}\,
+    \partial R_{bi}/\partial X_{a\alpha}` -- not just
+    ``QMMol.convert_back``'s rotate-back with the *current* rotation
+    matrix, which implicitly treats :math:`R(X)` as locally a constant
+    rotation. The Kabsch rotation is itself a nonlinear function of every
+    atom's position, so the two differ away from perfect alignment.
+
+    This computes that Jacobian in closed form -- for each atom/component,
+    perturb the centered lab positions and propagate the perturbation
+    through the polar decomposition :math:`C=US` of the cross-covariance
+    :math:`C=P^TQ` (solving for the rotation's linear response
+    :math:`\Omega`, :math:`dU=U\Omega`, via a 3x3 Sylvester equation in
+    :math:`S`'s eigenbasis), then contract the resulting
+    :math:`\partial R/\partial X_{a\alpha}` against ``force_aligned`` --
+    rather than by finite-differencing the alignment itself. Validated
+    against finite difference to machine precision.
+
+    This assumes the alignment stays on the same reflection/atom-reordering
+    branch under an infinitesimal perturbation (true for essentially any
+    real MD step). If ``op_rotate`` isn't already a proper rotation
+    (i.e. a reflection is in effect), it falls back to a finite-difference
+    Jacobian (``_kabsch_lab_frame_force_fd``) instead.
+
+    Parameters
+    ----------
+    qmmol : qmlearn.drivers.mol.QMMol
+        The (already Kabsch-aligned) molecule, as built by
+        ``QMMol.duplicate`` -- must carry ``atoms_init`` (the raw,
+        pre-alignment lab-frame geometry) and ``refatoms`` (the fixed
+        alignment reference).
+    force_aligned : ndarray, shape (natm, 3)
+        The force (i.e. already sign-flipped, :math:`-\nabla_R E`)
+        evaluated in the aligned frame -- e.g. the direct output of
+        ``EnginePyscf.get_forces_fci``, before ``QMMol.convert_back``.
+    step : float
+        Finite-difference step, only used in the (rare) reflection
+        fallback case.
+
+    Returns
+    -------
+    force_lab : ndarray, shape (natm, 3)
+        The force in the lab (real MD) frame.
+    """
+    atoms_init = qmmol.atoms_init
+    refatoms = qmmol.refatoms
+    n = len(atoms_init)
+    force_aligned = np.asarray(force_aligned).reshape(n, 3)
+
+    if np.linalg.det(qmmol.op_rotate) < 0:
+        return _kabsch_lab_frame_force_fd(qmmol, force_aligned, step=step)
+
+    X0 = atoms_init.positions.copy()
+    Xc = X0 - X0.mean(axis=0)                                # P = X - mean(X)  (centered lab positions)
+    Qc = refatoms.positions - refatoms.positions.mean(axis=0)  # Q = refatoms - mean(refatoms)
+    U, S = _kabsch_rotation_and_stretch(Xc, Qc)               # C = P^T Q = U S
+    lam, QS = np.linalg.eigh(S)                               # S = Q_S Lambda Q_S^T
+    denom = lam[:, None] + lam[None, :]                       # lambda_i + lambda_j
+
+    force_lab = np.zeros((n, 3))
+    for a in range(n):
+        for alpha in range(3):
+            dP = np.zeros((n, 3))
+            dP[:, alpha] = -1.0 / n
+            dP[a, alpha] += 1.0                               # dP^(a,alpha)_{b,beta} = delta_ab delta_(alpha,beta) - delta_(alpha,beta)/n
+            dC = dP.T @ Qc                                    # dC = dP^T Q
+            M = U.T @ dC                                      # M = U^T dC
+            Nt = QS.T @ (M - M.T) @ QS                        # N~ = Q_S^T (M - M^T) Q_S
+            Omega_t = np.where(np.abs(denom) > 1e-12, Nt / denom, 0.0)  # Omega~_ij = N~_ij / (lambda_i + lambda_j), i != j
+            np.fill_diagonal(Omega_t, 0.0)                    # Omega~_ii = 0
+            dU = U @ (QS @ Omega_t @ QS.T)                    # dU = U Omega,  Omega = Q_S Omega~ Q_S^T
+            dR = dP @ U + Xc @ dU                             # dR = dP U + P dU = dR/dX_{a,alpha}, shape (natm, 3)
+            force_lab[a, alpha] = np.sum(force_aligned * dR)  # F^lab_{a,alpha} = <F^al, dR>_F = sum_{b,i} F^al_{b,i} dR_{b,i}
+    return force_lab
+
+
+def _kabsch_lab_frame_force_fd(qmmol, force_aligned, step=1e-4):
+    r""" Finite-difference fallback for ``kabsch_lab_frame_force``, used
+    only when a reflection (not just a proper rotation) is active in the
+    current alignment -- see there for the normal, analytic path. """
+    from qmlearn.drivers.core import minimize_rmsd_operation
+
+    atoms_init = qmmol.atoms_init
+    refatoms = qmmol.refatoms
+    n = len(atoms_init)
+    X0 = atoms_init.positions.copy()
+
+    def aligned_positions(Xp):
+        ap = atoms_init.copy()
+        ap.set_positions(Xp)
+        op_rotate, op_translate, op_indices = minimize_rmsd_operation(
+            refatoms, ap, stereo=True, rotate_method='kabsch',
+            reorder_method='none', use_reflection=True)
+        ap = ap[op_indices]
+        return np.dot(ap.positions, op_rotate) + op_translate
+
+    force_lab = np.zeros((n, 3))
+    for a in range(n):
+        for alpha in range(3):
+            Xp = X0.copy(); Xp[a, alpha] += step
+            Xm = X0.copy(); Xm[a, alpha] -= step
+            Rp = aligned_positions(Xp)
+            Rm = aligned_positions(Xm)
+            dR = (Rp - Rm) / (2 * step)
+            force_lab[a, alpha] = np.sum(force_aligned * dR)
+    return force_lab
+
+
 def project_rigid_body(forces, positions):
     r""" Remove net force and net torque from a Cartesian gradient.
 
