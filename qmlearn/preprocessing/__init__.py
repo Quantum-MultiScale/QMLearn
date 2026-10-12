@@ -265,8 +265,14 @@ def append_properties(atoms, data = None, properties = None, refqmmol = None, re
             if inv:
                 vinv = np.linalg.inv(qmmol.engine.vext)
                 data[key].append(vinv @ qmmol.engine.delta_gamma)
-            else: 
+            else:
                 data[key].append(qmmol.engine.delta_gamma)
+        elif key == 'gamma_hf':
+            if inv:
+                vinv = np.linalg.inv(qmmol.engine.vext)
+                data[key].append(vinv @ qmmol.engine.gamma_hf)
+            else:
+                data[key].append(qmmol.engine.gamma_hf)
         elif key == 'occ_dg':
             data[key].append(qmmol.engine.occ_dg)
         elif key == 'occ':

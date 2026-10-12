@@ -60,6 +60,7 @@ class Engine(object):
         self._eig_gamma2 = None
         self._eig_gamma2c = None
         self._delta_gamma = None
+        self._gamma_hf = None
         self._gamma2cum = None
         self._gamma_00 = None
         self._gamma_01 = None

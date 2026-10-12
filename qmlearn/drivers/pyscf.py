@@ -630,6 +630,12 @@ class EnginePyscf(Engine):
         return self._delta_gamma
 
     @property
+    def gamma_hf(self):
+        if self._gamma_hf is None:
+            self._gamma_hf = self.mf.make_rdm1(ao_repr = True)
+        return self._gamma_hf
+
+    @property
     def all_gammas(self):
         if self._gamma2 is None:
             self.run(properties = ('energy','gamma2','gamma2c'), eig=False)
