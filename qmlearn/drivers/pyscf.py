@@ -632,6 +632,8 @@ class EnginePyscf(Engine):
     @property
     def gamma_hf(self):
         if self._gamma_hf is None:
+            if self.mf.mo_coeff is None:
+                self.mf.run()
             self._gamma_hf = self.mf.make_rdm1(ao_repr = True)
         return self._gamma_hf
 
