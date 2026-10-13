@@ -184,6 +184,8 @@ def append_properties(atoms, data = None, properties = None, refqmmol = None, re
         if ref_qmmol is not None and mom:
             ref_qmmol.engine.mf.run()
             qmmol.run(properties = properties, ref_qmmol = ref_qmmol, smearing = smearing, mom=mom, **kwargs)
+        elif not mom and not smearing and getattr(qmmol.engine, '_gamma', None) is None:
+            qmmol.run(properties = properties, **kwargs)
     else :
         if refqmmol is not None and mom is False:
             qmmol = refqmmol.duplicate(atoms, refatoms=atoms)

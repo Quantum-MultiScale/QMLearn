@@ -18,6 +18,16 @@ from pyscf import df
 from qmlearn.drivers.core import Engine, MOMOrbitalTracker
 from qmlearn.model.response import project_rigid_body
 
+def default_max_memory(fraction=0.8):
+    r""" PYSCF_MAX_MEMORY if set, else a fraction of the available memory (MB). """
+    if 'PYSCF_MAX_MEMORY' in os.environ:
+        return lib.param.MAX_MEMORY
+    try:
+        import psutil
+        return int(fraction * psutil.virtual_memory().available / 1e6)
+    except ImportError:
+        return lib.param.MAX_MEMORY
+
 methods_pyscf = {
         'dft' : dft.RKS,
         'hf' : scf.RHF,
@@ -82,6 +92,9 @@ class EnginePyscf(Engine):
 
         charge : int
             Total charge of the molecule
+        max_memory : int
+            Memory (MB) PySCF may use. Default: PYSCF_MAX_MEMORY if set,
+            else 80% of the available memory.
         """
         mol = self.options.get('mol', None)
         mf = self.options.get('mf', None)
@@ -95,6 +108,7 @@ class EnginePyscf(Engine):
         mom = self.options.get('mom',False)
         ref_qmmol = self.options.get('ref_qmmol',None)
         set_df = self.options.get('set_df', False)
+        max_memory = self.options.get('max_memory', None)
         #ao_repr = self.options.get('ao_repr', True)
         #
         if isinstance(self.method, str):
@@ -110,6 +124,7 @@ class EnginePyscf(Engine):
             mf = methods_pyscf[self.method.split('+')[0]](mol)
             mf.xc = xc
             mf.verbose = verbose
+            mf.max_memory = mol.max_memory = max_memory or default_max_memory()
         self.mf = mf
         self.mol = self.mf.mol
         self.h1e = self.mf.get_hcore()
@@ -153,7 +168,7 @@ class EnginePyscf(Engine):
             mol = gto.M(atom = atom, basis=basis, charge = charge,symmetry=symmetry, parse_arg = False)
         return mol
 
-    def run(self, properties = ('energy', 'forces'), ao_repr=True, eig=True, singlet=True,
+    def run(self, properties = ('energy', 'forces'), ao_repr=True, eig=False, singlet=True,
              mom=False, ref_qmmol=None, smearing=False, **kwargs):
         r""" Caculate electronic properties using PySCF.
 
@@ -607,20 +622,20 @@ class EnginePyscf(Engine):
 
     @property
     def energycum_df(self):
-        if self._energycum_df is None:
+        if self._energycum_df is None and self._gamma2c is None:
             self.run(properties = ('energy','gamma2cum'))
         return self._energycum_df
 
     @property
     def eig_gamma2c(self):
         if self._eig_gamma2c is None:
-            self.run(properties = ('energy','gamma2c'))
+            self.run(properties = ('energy','gamma2c'), eig=True)
         return self._eig_gamma2c
 
     @property
     def eig_gamma2(self):
         if self._eig_gamma2 is None:
-            self.run(properties = ('energy','gamma2'))
+            self.run(properties = ('energy','gamma2'), eig=True)
         return self._eig_gamma2
 
     @property
